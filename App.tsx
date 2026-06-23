@@ -6,6 +6,7 @@ import {
 import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 
 import AppNavigator from './src/navigation/AppNavigator';
+import { MeshProvider } from './src/mesh/MeshContext';
 import { colors } from './src/theme/colors';
 
 const navigationTheme = {
@@ -29,7 +30,9 @@ export default function App() {
 
   return (
     <NavigationContainer theme={navigationTheme}>
-      <AppNavigator />
+      <MeshProvider>
+        <AppNavigator />
+      </MeshProvider>
     </NavigationContainer>
   );
 }
