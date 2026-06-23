@@ -2,13 +2,16 @@ import {
   MeshServices,
   OfflineProtocol,
   type DiagnosticEvent,
+  type ServiceDiscoveredEvent,
   type ServiceRequestReceivedEvent,
+  type ServiceResponseReceivedEvent,
 } from '@offline-protocol/mesh-sdk';
 import {
   createContext,
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -17,10 +20,13 @@ import {
 import { getOrCreateUserId } from '../identity/getOrCreateUserId';
 import { requestBlePermissions } from '../permissions/requestBlePermissions';
 import { getNotes, saveNote } from '../storage/noteStorage';
-import type { Note } from '../types/Note';
+import type { Note, NoteType } from '../types/Note';
 
 const NOTE_SERVICE_ID = 'offline-notes.v1';
 const NOTE_SERVICE_VERSION = '1.0';
+const DISCOVERY_TIMEOUT_MS = 30000;
+const SERVICE_REQUEST_TIMEOUT_MS = 15000;
+const DISCOVERY_INTERVAL_MS = 45000;
 
 export type MeshStatus = 'idle' | 'starting' | 'running' | 'error';
 
@@ -30,12 +36,125 @@ export interface MeshContextValue {
   status: MeshStatus;
   peerCount: number;
   errorMessage: string | null;
+  userId: string | null;
   myNotes: Note[];
+  receivedNotes: Note[];
+  allNotes: Note[];
+  isDiscovering: boolean;
   loadMyNotes: () => Promise<void>;
   broadcastNote: (note: Note) => Promise<void>;
+  startDiscovery: () => Promise<void>;
 }
 
 export const MeshContext = createContext<MeshContextValue | null>(null);
+
+function waitForServiceDiscoveries(
+  protocol: OfflineProtocol,
+  queryId: string,
+  timeoutMs: number,
+): Promise<ServiceDiscoveredEvent[]> {
+  return new Promise(resolve => {
+    const results: ServiceDiscoveredEvent[] = [];
+
+    const handler = (event: ServiceDiscoveredEvent) => {
+      if (event.query_id === queryId && event.service_id === NOTE_SERVICE_ID) {
+        results.push(event);
+      }
+    };
+
+    protocol.on('service_discovered', handler);
+
+    setTimeout(() => {
+      protocol.off('service_discovered', handler);
+      resolve(results);
+    }, timeoutMs);
+  });
+}
+
+function requestServiceBody(
+  protocol: OfflineProtocol,
+  services: MeshServices,
+  provider: string,
+  noteId: string,
+  timeoutMs: number,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let requestId = '';
+    let settled = false;
+
+    const cleanup = (handler: (event: ServiceResponseReceivedEvent) => void) => {
+      protocol.off('service_response_received', handler);
+    };
+
+    const handler = (event: ServiceResponseReceivedEvent) => {
+      if (
+        settled ||
+        event.request_id !== requestId ||
+        event.service_id !== NOTE_SERVICE_ID
+      ) {
+        return;
+      }
+
+      settled = true;
+      cleanup(handler);
+
+      if (event.status === 'ok') {
+        resolve(event.body);
+        return;
+      }
+
+      reject(new Error(`Service request failed: ${event.status}`));
+    };
+
+    protocol.on('service_response_received', handler);
+
+    void services
+      .sendServiceRequest(
+        provider,
+        NOTE_SERVICE_ID,
+        'fetch',
+        JSON.stringify({ noteId }),
+      )
+      .then(id => {
+        requestId = id;
+      })
+      .catch(error => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        cleanup(handler);
+        reject(error);
+      });
+
+    setTimeout(() => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      cleanup(handler);
+      reject(new Error('Service request timed out'));
+    }, timeoutMs);
+  });
+}
+
+function noteFromDiscovery(
+  capabilities: Record<string, string>,
+  body: string,
+): Note {
+  return {
+    noteId: capabilities.noteId,
+    type: capabilities.type as NoteType,
+    title: capabilities.title,
+    body,
+    preview: capabilities.preview,
+    authorId: capabilities.authorId,
+    timestamp: capabilities.timestamp,
+    hopOrigin: Number(capabilities.hopOrigin),
+  };
+}
 
 export function MeshProvider({ children }: { children: ReactNode }) {
   const [protocol, setProtocol] = useState<OfflineProtocol | null>(null);
@@ -43,13 +162,56 @@ export function MeshProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<MeshStatus>('idle');
   const [peerCount, setPeerCount] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
   const [myNotes, setMyNotes] = useState<Note[]>([]);
+  const [receivedNotes, setReceivedNotes] = useState<Note[]>([]);
+  const [isDiscovering, setIsDiscovering] = useState(false);
 
   const serviceListenerRegistered = useRef(false);
+  const protocolRef = useRef<OfflineProtocol | null>(null);
+  const servicesRef = useRef<MeshServices | null>(null);
+  const userIdRef = useRef<string>('');
+  const myNotesRef = useRef<Note[]>([]);
+  const receivedNotesRef = useRef<Note[]>([]);
+  const discoveryInFlightRef = useRef(false);
+
+  useEffect(() => {
+    protocolRef.current = protocol;
+  }, [protocol]);
+
+  useEffect(() => {
+    servicesRef.current = services;
+  }, [services]);
+
+  useEffect(() => {
+    myNotesRef.current = myNotes;
+  }, [myNotes]);
+
+  useEffect(() => {
+    receivedNotesRef.current = receivedNotes;
+  }, [receivedNotes]);
+
+  const allNotes = useMemo(() => {
+    const byId = new Map<string, Note>();
+
+    for (const note of [...myNotes, ...receivedNotes]) {
+      byId.set(note.noteId, note);
+    }
+
+    return Array.from(byId.values()).sort(
+      (a, b) =>
+        new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+    );
+  }, [myNotes, receivedNotes]);
 
   const loadMyNotes = useCallback(async () => {
+    const currentUserId = userIdRef.current || (await getOrCreateUserId());
+    userIdRef.current = currentUserId;
+    setUserId(currentUserId);
+
     const notes = await getNotes();
-    setMyNotes(notes);
+    setMyNotes(notes.filter(note => note.authorId === currentUserId));
+    setReceivedNotes(notes.filter(note => note.authorId !== currentUserId));
   }, []);
 
   const registerServiceRequestListener = useCallback(
@@ -102,6 +264,86 @@ export function MeshProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  const startDiscovery = useCallback(async () => {
+    const activeProtocol = protocolRef.current;
+    const activeServices = servicesRef.current;
+    const currentUserId = userIdRef.current;
+
+    if (
+      !activeProtocol ||
+      !activeServices ||
+      !currentUserId ||
+      discoveryInFlightRef.current
+    ) {
+      return;
+    }
+
+    discoveryInFlightRef.current = true;
+    setIsDiscovering(true);
+
+    try {
+      const queryId = await activeServices.discoverServices(NOTE_SERVICE_ID);
+      const discoveries = await waitForServiceDiscoveries(
+        activeProtocol,
+        queryId,
+        DISCOVERY_TIMEOUT_MS,
+      );
+
+      const seenNoteIds = new Set<string>([
+        ...myNotesRef.current.map(note => note.noteId),
+        ...receivedNotesRef.current.map(note => note.noteId),
+      ]);
+
+      for (const discovery of discoveries) {
+        const { capabilities, provider_peer_id: peer } = discovery;
+        const noteId = capabilities.noteId;
+
+        if (!noteId || seenNoteIds.has(noteId)) {
+          continue;
+        }
+
+        if (capabilities.authorId === currentUserId) {
+          continue;
+        }
+
+        try {
+          const responseBody = await requestServiceBody(
+            activeProtocol,
+            activeServices,
+            peer,
+            noteId,
+            SERVICE_REQUEST_TIMEOUT_MS,
+          );
+          const parsed = JSON.parse(responseBody) as { body?: string };
+
+          if (!parsed.body) {
+            continue;
+          }
+
+          const note = noteFromDiscovery(capabilities, parsed.body);
+          await saveNote(note);
+          seenNoteIds.add(note.noteId);
+
+          setReceivedNotes(prev => [
+            note,
+            ...prev.filter(existing => existing.noteId !== note.noteId),
+          ]);
+        } catch (error) {
+          if (__DEV__) {
+            console.log('[mesh discovery] failed to fetch note', error);
+          }
+        }
+      }
+    } catch (error) {
+      if (__DEV__) {
+        console.log('[mesh discovery] scan failed', error);
+      }
+    } finally {
+      discoveryInFlightRef.current = false;
+      setIsDiscovering(false);
+    }
+  }, []);
+
   const broadcastNote = useCallback(
     async (note: Note) => {
       if (!protocol || !services) {
@@ -149,7 +391,10 @@ export function MeshProvider({ children }: { children: ReactNode }) {
 
     async function startMesh() {
       try {
-        const userId = await getOrCreateUserId();
+        const currentUserId = await getOrCreateUserId();
+        userIdRef.current = currentUserId;
+        setUserId(currentUserId);
+
         const granted = await requestBlePermissions();
 
         if (cancelled) {
@@ -164,7 +409,7 @@ export function MeshProvider({ children }: { children: ReactNode }) {
 
         activeProtocol = new OfflineProtocol({
           appId: 'olns',
-          userId,
+          userId: currentUserId,
           newArchEnabled: false,
           transports: {
             ble: { enabled: true },
@@ -184,6 +429,8 @@ export function MeshProvider({ children }: { children: ReactNode }) {
 
         setProtocol(activeProtocol);
         setServices(activeServices);
+        protocolRef.current = activeProtocol;
+        servicesRef.current = activeServices;
         setStatus('starting');
 
         await activeProtocol.start();
@@ -194,6 +441,12 @@ export function MeshProvider({ children }: { children: ReactNode }) {
 
         setStatus('running');
         await loadMyNotes();
+
+        if (cancelled) {
+          return;
+        }
+
+        await startDiscovery();
       } catch (error) {
         if (cancelled) {
           return;
@@ -220,13 +473,30 @@ export function MeshProvider({ children }: { children: ReactNode }) {
           .finally(() => {
             setProtocol(null);
             setServices(null);
+            protocolRef.current = null;
+            servicesRef.current = null;
             setPeerCount(0);
             setMyNotes([]);
+            setReceivedNotes([]);
+            setUserId(null);
+            userIdRef.current = '';
             setStatus('idle');
           });
       }
     };
-  }, [loadMyNotes]);
+  }, [loadMyNotes, startDiscovery]);
+
+  useEffect(() => {
+    if (status !== 'running') {
+      return;
+    }
+
+    const intervalId = setInterval(() => {
+      void startDiscovery();
+    }, DISCOVERY_INTERVAL_MS);
+
+    return () => clearInterval(intervalId);
+  }, [status, startDiscovery]);
 
   return (
     <MeshContext.Provider
@@ -236,9 +506,14 @@ export function MeshProvider({ children }: { children: ReactNode }) {
         status,
         peerCount,
         errorMessage,
+        userId,
         myNotes,
+        receivedNotes,
+        allNotes,
+        isDiscovering,
         loadMyNotes,
         broadcastNote,
+        startDiscovery,
       }}>
       {children}
     </MeshContext.Provider>
