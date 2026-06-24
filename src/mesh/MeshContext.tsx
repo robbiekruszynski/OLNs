@@ -26,9 +26,11 @@ import type { Note, NoteType } from '../types/Note';
 
 const NOTE_SERVICE_ID = 'offline-notes.v1';
 const NOTE_SERVICE_VERSION = '1.0';
-const DISCOVERY_TIMEOUT_MS = 30000;
-const SERVICE_REQUEST_TIMEOUT_MS = 15000;
-const DISCOVERY_INTERVAL_MS = 45000;
+// Tuned for faster pickup during dev/testing — increase for production/battery.
+const DISCOVERY_TIMEOUT_MS = 8000;
+const SERVICE_REQUEST_TIMEOUT_MS = 8000;
+const DISCOVERY_INTERVAL_MS = 12000;
+const NEIGHBOR_DISCOVERY_DEBOUNCE_MS = 1500;
 
 export const MAX_HOPS = 6;
 
@@ -53,27 +55,39 @@ export interface MeshContextValue {
 
 export const MeshContext = createContext<MeshContextValue | null>(null);
 
-function waitForServiceDiscoveries(
+async function collectServiceDiscoveries(
   protocol: OfflineProtocol,
-  queryId: string,
+  startQuery: () => Promise<string>,
   timeoutMs: number,
 ): Promise<ServiceDiscoveredEvent[]> {
-  return new Promise(resolve => {
-    const results: ServiceDiscoveredEvent[] = [];
+  const results: ServiceDiscoveredEvent[] = [];
+  let queryId: string | null = null;
 
-    const handler = (event: ServiceDiscoveredEvent) => {
-      if (event.query_id === queryId && event.service_id === NOTE_SERVICE_ID) {
-        results.push(event);
-      }
-    };
+  const handler = (event: ServiceDiscoveredEvent) => {
+    if (
+      queryId &&
+      event.query_id === queryId &&
+      event.service_id === NOTE_SERVICE_ID
+    ) {
+      results.push(event);
+    }
+  };
 
-    protocol.on('service_discovered', handler);
+  protocol.on('service_discovered', handler);
 
-    setTimeout(() => {
-      protocol.off('service_discovered', handler);
-      resolve(results);
-    }, timeoutMs);
+  try {
+    queryId = await startQuery();
+  } catch (error) {
+    protocol.off('service_discovered', handler);
+    throw error;
+  }
+
+  await new Promise<void>(resolve => {
+    setTimeout(resolve, timeoutMs);
   });
+
+  protocol.off('service_discovered', handler);
+  return results;
 }
 
 function requestServiceBody(
@@ -174,7 +188,7 @@ function noteCapabilities(note: Note): Record<string, string> {
 }
 
 function randomRelayDelay(): Promise<void> {
-  const delayMs = 500 + Math.random() * 1500;
+  const delayMs = 200 + Math.random() * 600;
   return new Promise(resolve => setTimeout(resolve, delayMs));
 }
 
@@ -199,6 +213,10 @@ export function MeshProvider({ children }: { children: ReactNode }) {
   const discoveryInFlightRef = useRef(false);
   const relayedNoteIdsRef = useRef<Set<string>>(new Set());
   const activePeerIdsRef = useRef<Set<string>>(new Set());
+  const neighborDiscoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const startDiscoveryRef = useRef<() => Promise<void>>(async () => {});
 
   useEffect(() => {
     protocolRef.current = protocol;
@@ -371,10 +389,9 @@ export function MeshProvider({ children }: { children: ReactNode }) {
     setIsDiscovering(true);
 
     try {
-      const queryId = await activeServices.discoverServices(NOTE_SERVICE_ID);
-      const discoveries = await waitForServiceDiscoveries(
+      const discoveries = await collectServiceDiscoveries(
         activeProtocol,
-        queryId,
+        () => activeServices.discoverServices(NOTE_SERVICE_ID),
         DISCOVERY_TIMEOUT_MS,
       );
 
@@ -439,6 +456,10 @@ export function MeshProvider({ children }: { children: ReactNode }) {
     }
   }, [relayNote]);
 
+  useEffect(() => {
+    startDiscoveryRef.current = startDiscovery;
+  }, [startDiscovery]);
+
   const broadcastNote = useCallback(
     async (note: Note) => {
       if (!protocol || !services) {
@@ -470,6 +491,14 @@ export function MeshProvider({ children }: { children: ReactNode }) {
       activePeerIdsRef.current.add(event.peer_id);
       syncActivePeerIds();
       setPeerCount(prev => prev + 1);
+
+      if (neighborDiscoveryTimerRef.current) {
+        clearTimeout(neighborDiscoveryTimerRef.current);
+      }
+
+      neighborDiscoveryTimerRef.current = setTimeout(() => {
+        void startDiscoveryRef.current();
+      }, NEIGHBOR_DISCOVERY_DEBOUNCE_MS);
     };
 
     const onNeighborLost = (event: NeighborLostEvent) => {
@@ -562,6 +591,11 @@ export function MeshProvider({ children }: { children: ReactNode }) {
       serviceListenerRegistered.current = false;
       relayedNoteIdsRef.current.clear();
       activePeerIdsRef.current.clear();
+
+      if (neighborDiscoveryTimerRef.current) {
+        clearTimeout(neighborDiscoveryTimerRef.current);
+        neighborDiscoveryTimerRef.current = null;
+      }
 
       if (activeProtocol) {
         activeProtocol.removeAllListeners();
