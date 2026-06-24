@@ -9,4 +9,5 @@ export interface Note {
   authorId: string;
   timestamp: string;
   hopOrigin: number;
+  relayedBy?: string[];
 }

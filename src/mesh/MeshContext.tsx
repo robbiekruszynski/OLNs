@@ -2,6 +2,8 @@ import {
   MeshServices,
   OfflineProtocol,
   type DiagnosticEvent,
+  type NeighborDiscoveredEvent,
+  type NeighborLostEvent,
   type ServiceDiscoveredEvent,
   type ServiceRequestReceivedEvent,
   type ServiceResponseReceivedEvent,
@@ -28,6 +30,8 @@ const DISCOVERY_TIMEOUT_MS = 30000;
 const SERVICE_REQUEST_TIMEOUT_MS = 15000;
 const DISCOVERY_INTERVAL_MS = 45000;
 
+export const MAX_HOPS = 6;
+
 export type MeshStatus = 'idle' | 'starting' | 'running' | 'error';
 
 export interface MeshContextValue {
@@ -35,6 +39,7 @@ export interface MeshContextValue {
   services: MeshServices | null;
   status: MeshStatus;
   peerCount: number;
+  activePeerIds: string[];
   errorMessage: string | null;
   userId: string | null;
   myNotes: Note[];
@@ -156,11 +161,29 @@ function noteFromDiscovery(
   };
 }
 
+function noteCapabilities(note: Note): Record<string, string> {
+  return {
+    noteId: note.noteId,
+    type: note.type,
+    title: note.title,
+    preview: note.preview,
+    authorId: note.authorId,
+    timestamp: note.timestamp,
+    hopOrigin: String(note.hopOrigin),
+  };
+}
+
+function randomRelayDelay(): Promise<void> {
+  const delayMs = 500 + Math.random() * 1500;
+  return new Promise(resolve => setTimeout(resolve, delayMs));
+}
+
 export function MeshProvider({ children }: { children: ReactNode }) {
   const [protocol, setProtocol] = useState<OfflineProtocol | null>(null);
   const [services, setServices] = useState<MeshServices | null>(null);
   const [status, setStatus] = useState<MeshStatus>('idle');
   const [peerCount, setPeerCount] = useState(0);
+  const [activePeerIds, setActivePeerIds] = useState<string[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [myNotes, setMyNotes] = useState<Note[]>([]);
@@ -174,6 +197,8 @@ export function MeshProvider({ children }: { children: ReactNode }) {
   const myNotesRef = useRef<Note[]>([]);
   const receivedNotesRef = useRef<Note[]>([]);
   const discoveryInFlightRef = useRef(false);
+  const relayedNoteIdsRef = useRef<Set<string>>(new Set());
+  const activePeerIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     protocolRef.current = protocol;
@@ -190,6 +215,10 @@ export function MeshProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     receivedNotesRef.current = receivedNotes;
   }, [receivedNotes]);
+
+  const syncActivePeerIds = useCallback(() => {
+    setActivePeerIds(Array.from(activePeerIdsRef.current));
+  }, []);
 
   const allNotes = useMemo(() => {
     const byId = new Map<string, Note>();
@@ -264,6 +293,66 @@ export function MeshProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  const relayNote = useCallback(
+    async (note: Note) => {
+      const currentUserId = userIdRef.current;
+      const activeServices = servicesRef.current;
+      const activeProtocol = protocolRef.current;
+
+      if (!currentUserId || !activeServices || !activeProtocol) {
+        return;
+      }
+
+      if (note.authorId === currentUserId) {
+        return;
+      }
+
+      if (relayedNoteIdsRef.current.has(note.noteId)) {
+        return;
+      }
+
+      if (note.hopOrigin >= MAX_HOPS) {
+        return;
+      }
+
+      await randomRelayDelay();
+
+      const relayHop = note.hopOrigin + 1;
+      const relayedBy = [...(note.relayedBy ?? []), currentUserId];
+      const relayedNote: Note = {
+        ...note,
+        hopOrigin: relayHop,
+        relayedBy,
+      };
+
+      await activeServices.registerService(
+        NOTE_SERVICE_ID,
+        NOTE_SERVICE_VERSION,
+        noteCapabilities(relayedNote),
+      );
+
+      relayedNoteIdsRef.current.add(note.noteId);
+      registerServiceRequestListener(activeProtocol, activeServices);
+
+      const storedNote: Note = {
+        ...note,
+        relayedBy,
+      };
+      await saveNote(storedNote);
+
+      setReceivedNotes(prev =>
+        prev.map(existing =>
+          existing.noteId === note.noteId ? storedNote : existing,
+        ),
+      );
+
+      if (__DEV__) {
+        console.log(`[OLNs] Relaying note ${note.noteId} at hop ${relayHop}`);
+      }
+    },
+    [registerServiceRequestListener],
+  );
+
   const startDiscovery = useCallback(async () => {
     const activeProtocol = protocolRef.current;
     const activeServices = servicesRef.current;
@@ -328,6 +417,12 @@ export function MeshProvider({ children }: { children: ReactNode }) {
             note,
             ...prev.filter(existing => existing.noteId !== note.noteId),
           ]);
+
+          void relayNote(note).catch(error => {
+            if (__DEV__) {
+              console.log('[OLNs] relay failed', error);
+            }
+          });
         } catch (error) {
           if (__DEV__) {
             console.log('[mesh discovery] failed to fetch note', error);
@@ -342,7 +437,7 @@ export function MeshProvider({ children }: { children: ReactNode }) {
       discoveryInFlightRef.current = false;
       setIsDiscovering(false);
     }
-  }, []);
+  }, [relayNote]);
 
   const broadcastNote = useCallback(
     async (note: Note) => {
@@ -350,15 +445,11 @@ export function MeshProvider({ children }: { children: ReactNode }) {
         throw new Error('Mesh not ready');
       }
 
-      await services.registerService(NOTE_SERVICE_ID, NOTE_SERVICE_VERSION, {
-        noteId: note.noteId,
-        type: note.type,
-        title: note.title,
-        preview: note.preview,
-        authorId: note.authorId,
-        timestamp: note.timestamp,
-        hopOrigin: String(note.hopOrigin),
-      });
+      await services.registerService(
+        NOTE_SERVICE_ID,
+        NOTE_SERVICE_VERSION,
+        noteCapabilities(note),
+      );
 
       await saveNote(note);
       setMyNotes(prev => [
@@ -375,11 +466,15 @@ export function MeshProvider({ children }: { children: ReactNode }) {
     let activeServices: MeshServices | null = null;
     let cancelled = false;
 
-    const onNeighborDiscovered = () => {
+    const onNeighborDiscovered = (event: NeighborDiscoveredEvent) => {
+      activePeerIdsRef.current.add(event.peer_id);
+      syncActivePeerIds();
       setPeerCount(prev => prev + 1);
     };
 
-    const onNeighborLost = () => {
+    const onNeighborLost = (event: NeighborLostEvent) => {
+      activePeerIdsRef.current.delete(event.peer_id);
+      syncActivePeerIds();
       setPeerCount(prev => Math.max(0, prev - 1));
     };
 
@@ -439,6 +534,7 @@ export function MeshProvider({ children }: { children: ReactNode }) {
           return;
         }
 
+        registerServiceRequestListener(activeProtocol, activeServices);
         setStatus('running');
         await loadMyNotes();
 
@@ -464,6 +560,8 @@ export function MeshProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
       serviceListenerRegistered.current = false;
+      relayedNoteIdsRef.current.clear();
+      activePeerIdsRef.current.clear();
 
       if (activeProtocol) {
         activeProtocol.removeAllListeners();
@@ -476,6 +574,7 @@ export function MeshProvider({ children }: { children: ReactNode }) {
             protocolRef.current = null;
             servicesRef.current = null;
             setPeerCount(0);
+            setActivePeerIds([]);
             setMyNotes([]);
             setReceivedNotes([]);
             setUserId(null);
@@ -484,7 +583,7 @@ export function MeshProvider({ children }: { children: ReactNode }) {
           });
       }
     };
-  }, [loadMyNotes, startDiscovery]);
+  }, [loadMyNotes, registerServiceRequestListener, startDiscovery, syncActivePeerIds]);
 
   useEffect(() => {
     if (status !== 'running') {
@@ -505,6 +604,7 @@ export function MeshProvider({ children }: { children: ReactNode }) {
         services,
         status,
         peerCount,
+        activePeerIds,
         errorMessage,
         userId,
         myNotes,

@@ -23,6 +23,7 @@ export default function FeedScreen() {
     peerCount,
     errorMessage,
     userId,
+    activePeerIds,
     allNotes,
     isDiscovering,
     startDiscovery,
@@ -113,7 +114,13 @@ export default function FeedScreen() {
   }
 
   function renderNote({ item }: { item: Note }) {
-    return <NoteCard note={item} isOwn={item.authorId === userId} />;
+    const isOwn = item.authorId === userId;
+    const isGhost =
+      !isOwn && !activePeerIds.includes(item.authorId);
+
+    return (
+      <NoteCard note={item} isOwn={isOwn} isGhost={isGhost} />
+    );
   }
 
   return (

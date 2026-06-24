@@ -1,5 +1,6 @@
 import { StyleSheet, Text, View } from 'react-native';
 
+import { MAX_HOPS } from '../mesh/MeshContext';
 import { colors } from '../theme/colors';
 import { fonts } from '../theme/typography';
 import { spacing } from '../theme/spacing';
@@ -8,6 +9,7 @@ import type { Note } from '../types/Note';
 interface NoteCardProps {
   note: Note;
   isOwn: boolean;
+  isGhost: boolean;
 }
 
 function formatTimestamp(iso: string): string {
@@ -20,27 +22,55 @@ function formatTimestamp(iso: string): string {
   return `${hours}:${minutes} · ${day} ${month}`;
 }
 
-export default function NoteCard({ note, isOwn }: NoteCardProps) {
+function getHopBadge(note: Note) {
+  if (note.hopOrigin >= MAX_HOPS - 1) {
+    return {
+      label: `HOP ${note.hopOrigin} ⚠`,
+      style: styles.hopBadgeLimit,
+    };
+  }
+
+  if (note.hopOrigin >= 2) {
+    return {
+      label: `HOP ${note.hopOrigin}`,
+      style: styles.hopBadgeTraveling,
+    };
+  }
+
+  if (note.hopOrigin === 1) {
+    return {
+      label: 'HOP 1',
+      style: styles.hopBadgeRelay,
+    };
+  }
+
+  return {
+    label: 'ORIGIN',
+    style: styles.hopBadgeOrigin,
+  };
+}
+
+export default function NoteCard({ note, isOwn, isGhost }: NoteCardProps) {
   const previewSuffix = note.body.length > note.preview.length ? '...' : '';
+  const hopBadge = getHopBadge(note);
 
   return (
     <View
       style={[
         styles.card,
-        isOwn ? styles.cardOwn : styles.cardReceived,
-        isOwn && styles.cardOwnAccent,
+        isGhost
+          ? styles.cardGhost
+          : isOwn
+            ? styles.cardOwn
+            : styles.cardReceived,
+        isOwn && !isGhost && styles.cardOwnAccent,
       ]}>
       <View style={styles.topRow}>
         <Text style={styles.typeLabel}>{note.type.toUpperCase()}</Text>
-        <Text
-          style={[
-            styles.hopBadge,
-            note.hopOrigin === 0
-              ? styles.hopBadgeOrigin
-              : styles.hopBadgeRelay,
-          ]}>
-          {note.hopOrigin === 0 ? 'ORIGIN' : `HOP ${note.hopOrigin}`}
-        </Text>
+        <View style={styles.badgeRow}>
+          {isGhost && <Text style={styles.ghostIndicator}>SIGNAL LOST</Text>}
+          <Text style={[styles.hopBadge, hopBadge.style]}>{hopBadge.label}</Text>
+        </View>
       </View>
 
       <Text style={styles.title}>{note.title}</Text>
@@ -75,6 +105,10 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderColor: colors.border,
   },
+  cardGhost: {
+    backgroundColor: colors.ghostNote,
+    borderColor: colors.border,
+  },
   cardOwnAccent: {
     borderLeftWidth: 3,
     borderLeftColor: colors.accent,
@@ -84,11 +118,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
+  badgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
   typeLabel: {
     color: colors.accent,
     fontSize: 10,
     letterSpacing: 3,
     fontFamily: fonts.bold,
+  },
+  ghostIndicator: {
+    color: colors.textMeta,
+    fontSize: 9,
+    letterSpacing: 2,
+    fontFamily: fonts.regular,
   },
   hopBadge: {
     fontSize: 9,
@@ -100,6 +145,12 @@ const styles = StyleSheet.create({
   },
   hopBadgeRelay: {
     color: colors.textSecondary,
+  },
+  hopBadgeTraveling: {
+    color: colors.accent,
+  },
+  hopBadgeLimit: {
+    color: colors.error,
   },
   title: {
     color: colors.textPrimary,
