@@ -213,6 +213,8 @@ export function MeshProvider({ children }: { children: ReactNode }) {
   const discoveryInFlightRef = useRef(false);
   const relayedNoteIdsRef = useRef<Set<string>>(new Set());
   const activePeerIdsRef = useRef<Set<string>>(new Set());
+  const activeAuthorIdsRef = useRef<Set<string>>(new Set());
+  const peerIdToAuthorIdRef = useRef<Map<string, string>>(new Map());
   const neighborDiscoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -235,7 +237,7 @@ export function MeshProvider({ children }: { children: ReactNode }) {
   }, [receivedNotes]);
 
   const syncActivePeerIds = useCallback(() => {
-    setActivePeerIds(Array.from(activePeerIdsRef.current));
+    setActivePeerIds(Array.from(activeAuthorIdsRef.current));
   }, []);
 
   const allNotes = useMemo(() => {
@@ -435,6 +437,15 @@ export function MeshProvider({ children }: { children: ReactNode }) {
             ...prev.filter(existing => existing.noteId !== note.noteId),
           ]);
 
+          peerIdToAuthorIdRef.current.set(
+            discovery.provider_peer_id,
+            capabilities.authorId,
+          );
+          if (activePeerIdsRef.current.has(discovery.provider_peer_id)) {
+            activeAuthorIdsRef.current.add(capabilities.authorId);
+            syncActivePeerIds();
+          }
+
           void relayNote(note).catch(error => {
             if (__DEV__) {
               console.log('[OLNs] relay failed', error);
@@ -489,7 +500,11 @@ export function MeshProvider({ children }: { children: ReactNode }) {
 
     const onNeighborDiscovered = (event: NeighborDiscoveredEvent) => {
       activePeerIdsRef.current.add(event.peer_id);
-      syncActivePeerIds();
+      const authorId = peerIdToAuthorIdRef.current.get(event.peer_id);
+      if (authorId) {
+        activeAuthorIdsRef.current.add(authorId);
+        syncActivePeerIds();
+      }
       setPeerCount(prev => prev + 1);
 
       if (neighborDiscoveryTimerRef.current) {
@@ -503,7 +518,11 @@ export function MeshProvider({ children }: { children: ReactNode }) {
 
     const onNeighborLost = (event: NeighborLostEvent) => {
       activePeerIdsRef.current.delete(event.peer_id);
-      syncActivePeerIds();
+      const authorId = peerIdToAuthorIdRef.current.get(event.peer_id);
+      if (authorId) {
+        activeAuthorIdsRef.current.delete(authorId);
+        syncActivePeerIds();
+      }
       setPeerCount(prev => Math.max(0, prev - 1));
     };
 
@@ -591,6 +610,8 @@ export function MeshProvider({ children }: { children: ReactNode }) {
       serviceListenerRegistered.current = false;
       relayedNoteIdsRef.current.clear();
       activePeerIdsRef.current.clear();
+      activeAuthorIdsRef.current.clear();
+      peerIdToAuthorIdRef.current.clear();
 
       if (neighborDiscoveryTimerRef.current) {
         clearTimeout(neighborDiscoveryTimerRef.current);

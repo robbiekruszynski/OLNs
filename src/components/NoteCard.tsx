@@ -130,7 +130,7 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
   },
   ghostIndicator: {
-    color: colors.textMeta,
+    color: colors.error,
     fontSize: 9,
     letterSpacing: 2,
     fontFamily: fonts.regular,
