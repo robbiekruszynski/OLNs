@@ -5,7 +5,7 @@ import {
 } from '@expo-google-fonts/ibm-plex-mono';
 import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 
-import AppNavigator from './src/navigation/AppNavigator';
+import { RootNavigator } from './src/navigation/AppNavigator';
 import { MeshProvider } from './src/mesh/MeshContext';
 import { colors } from './src/theme/colors';
 
@@ -31,7 +31,7 @@ export default function App() {
   return (
     <NavigationContainer theme={navigationTheme}>
       <MeshProvider>
-        <AppNavigator />
+        <RootNavigator />
       </MeshProvider>
     </NavigationContainer>
   );

@@ -1,8 +1,10 @@
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { createStackNavigator } from '@react-navigation/stack';
 import { Text } from 'react-native';
 
 import ComposeScreen from '../screens/ComposeScreen';
 import FeedScreen from '../screens/FeedScreen';
+import HomeScreen from '../screens/HomeScreen';
 import { colors } from '../theme/colors';
 
 export type RootTabParamList = {
@@ -10,7 +12,13 @@ export type RootTabParamList = {
   Compose: undefined;
 };
 
+export type RootStackParamList = {
+  Home: undefined;
+  Main: undefined;
+};
+
 const Tab = createBottomTabNavigator<RootTabParamList>();
+const RootStack = createStackNavigator<RootStackParamList>();
 
 function TabIcon({
   glyph,
@@ -32,7 +40,7 @@ function TabIcon({
   );
 }
 
-export default function AppNavigator() {
+function TabNavigator() {
   return (
     <Tab.Navigator
       initialRouteName="Feed"
@@ -69,3 +77,14 @@ export default function AppNavigator() {
     </Tab.Navigator>
   );
 }
+
+export function RootNavigator() {
+  return (
+    <RootStack.Navigator screenOptions={{ headerShown: false }}>
+      <RootStack.Screen name="Home" component={HomeScreen} />
+      <RootStack.Screen name="Main" component={TabNavigator} />
+    </RootStack.Navigator>
+  );
+}
+
+export default RootNavigator;
