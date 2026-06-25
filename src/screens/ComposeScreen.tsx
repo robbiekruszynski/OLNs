@@ -1,19 +1,24 @@
 import * as Crypto from 'expo-crypto';
+import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
+import { useNavigation } from '@react-navigation/native';
 import { useRef, useState } from 'react';
 import {
   Animated,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
   StyleSheet,
   Text,
   TextInput,
+  TouchableWithoutFeedback,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { getOrCreateUserId } from '../identity/getOrCreateUserId';
 import { useMesh } from '../mesh/MeshContext';
+import type { RootTabParamList } from '../navigation/AppNavigator';
 import { colors, getNoteTypeColor } from '../theme/colors';
 import { fonts, typography } from '../theme/typography';
 import type { Note, NoteType } from '../types/Note';
@@ -30,6 +35,7 @@ const BODY_MAX = 1000;
 
 export default function ComposeScreen() {
   const insets = useSafeAreaInsets();
+  const navigation = useNavigation<BottomTabNavigationProp<RootTabParamList>>();
   const { broadcastNote } = useMesh();
 
   const [selectedType, setSelectedType] = useState<NoteType>('information');
@@ -56,6 +62,7 @@ export default function ComposeScreen() {
     }).start(({ finished }) => {
       if (finished) {
         setSuccessVisible(false);
+        navigation.navigate('Feed');
       }
     });
   }
@@ -86,6 +93,7 @@ export default function ComposeScreen() {
 
       await broadcastNote(note);
 
+      Keyboard.dismiss();
       setSuccessTypeColor(getNoteTypeColor(selectedType));
       setTitle('');
       setBody('');
@@ -102,109 +110,117 @@ export default function ComposeScreen() {
     <KeyboardAvoidingView
       style={styles.flex}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-      <View
-        style={[
-          styles.container,
-          {
-            paddingTop: insets.top + 16,
-            paddingBottom: insets.bottom + 16,
-          },
-        ]}>
-        <View style={styles.headerRow}>
-          <Text style={styles.headerTitle}>// COMPOSE</Text>
-          <Pressable
-            onPress={handleBroadcast}
-            disabled={!canBroadcast}
-            style={[
-              styles.broadcastButton,
-              canBroadcast
-                ? {
-                    backgroundColor: selectedTypeColor,
-                    borderColor: selectedTypeColor,
-                  }
-                : styles.broadcastButtonInactive,
-            ]}>
-            <Text
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+        <View
+          style={[
+            styles.container,
+            {
+              paddingTop: insets.top + 16,
+              paddingBottom: insets.bottom + 16,
+            },
+          ]}>
+          <View style={styles.headerRow}>
+            <Pressable
+              onPress={Keyboard.dismiss}
+              style={styles.dismissButton}
+              hitSlop={4}>
+              <Text style={styles.dismissLabel}>✕</Text>
+            </Pressable>
+            <Text style={styles.headerTitle}>// COMPOSE</Text>
+            <Pressable
+              onPress={handleBroadcast}
+              disabled={!canBroadcast}
               style={[
-                styles.broadcastLabel,
+                styles.broadcastButton,
                 canBroadcast
-                  ? styles.broadcastLabelActive
-                  : styles.broadcastLabelInactive,
+                  ? {
+                      backgroundColor: selectedTypeColor,
+                      borderColor: selectedTypeColor,
+                    }
+                  : styles.broadcastButtonInactive,
               ]}>
-              BROADCAST
-            </Text>
-          </Pressable>
-        </View>
-
-        <View style={styles.typeRow}>
-          {NOTE_TYPES.map(type => {
-            const selected = selectedType === type;
-            const typeColor = getNoteTypeColor(type);
-
-            return (
-              <Pressable
-                key={type}
-                onPress={() => setSelectedType(type)}
+              <Text
                 style={[
-                  styles.typePill,
-                  selected
-                    ? {
-                        backgroundColor: `${typeColor}33`,
-                        borderColor: typeColor,
-                      }
-                    : styles.typePillDefault,
+                  styles.broadcastLabel,
+                  canBroadcast
+                    ? styles.broadcastLabelActive
+                    : styles.broadcastLabelInactive,
                 ]}>
-                <Text
+                BROADCAST
+              </Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.typeRow}>
+            {NOTE_TYPES.map(type => {
+              const selected = selectedType === type;
+              const typeColor = getNoteTypeColor(type);
+
+              return (
+                <Pressable
+                  key={type}
+                  onPress={() => setSelectedType(type)}
                   style={[
-                    styles.typePillLabel,
+                    styles.typePill,
                     selected
                       ? {
-                          color: typeColor,
-                          fontFamily: fonts.bold,
+                          backgroundColor: `${typeColor}33`,
+                          borderColor: typeColor,
                         }
-                      : styles.typePillLabelDefault,
+                      : styles.typePillDefault,
                   ]}>
-                  {type.toUpperCase()}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
+                  <Text
+                    style={[
+                      styles.typePillLabel,
+                      selected
+                        ? {
+                            color: typeColor,
+                            fontFamily: fonts.bold,
+                          }
+                        : styles.typePillLabelDefault,
+                    ]}>
+                    {type.toUpperCase()}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
 
-        <View style={styles.titleBlock}>
-          <TextInput
-            value={title}
-            onChangeText={value => setTitle(value.slice(0, TITLE_MAX))}
-            placeholder="TRANSMISSION TITLE"
-            placeholderTextColor={colors.textMeta}
-            style={styles.titleInput}
-            maxLength={TITLE_MAX}
-          />
-          <Text style={styles.titleCount}>
-            {String(title.length).padStart(2, '0')}/{TITLE_MAX}
-          </Text>
-        </View>
+          <View style={styles.titleBlock}>
+            <TextInput
+              value={title}
+              onChangeText={value => setTitle(value.slice(0, TITLE_MAX))}
+              placeholder="TRANSMISSION TITLE"
+              placeholderTextColor={colors.textMeta}
+              style={styles.titleInput}
+              maxLength={TITLE_MAX}
+            />
+            <Text style={styles.titleCount}>
+              {String(title.length).padStart(2, '0')}/{TITLE_MAX}
+            </Text>
+          </View>
 
-        <View style={styles.bodyBlock}>
-          <TextInput
-            value={body}
-            onChangeText={value => setBody(value.slice(0, BODY_MAX))}
-            placeholder="COMPOSE YOUR NOTE..."
-            placeholderTextColor={colors.textMeta}
-            style={styles.bodyInput}
-            multiline
-            textAlignVertical="top"
-            maxLength={BODY_MAX}
-          />
-          <Text style={styles.bodyCount}>
-            {String(body.length).padStart(4, '0')}/{BODY_MAX}
-          </Text>
-        </View>
+          <View style={styles.bodyBlock}>
+            <TextInput
+              value={body}
+              onChangeText={value => setBody(value.slice(0, BODY_MAX))}
+              placeholder="COMPOSE YOUR NOTE..."
+              placeholderTextColor={colors.textMeta}
+              style={styles.bodyInput}
+              multiline
+              textAlignVertical="top"
+              maxLength={BODY_MAX}
+            />
+            <Text style={styles.bodyCount}>
+              {String(body.length).padStart(4, '0')}/{BODY_MAX}
+            </Text>
+          </View>
 
-        {errorVisible && (
-          <Text style={styles.errorMessage}>BROADCAST FAILED</Text>
-        )}
-      </View>
+          {errorVisible && (
+            <Text style={styles.errorMessage}>BROADCAST FAILED</Text>
+          )}
+        </View>
+      </TouchableWithoutFeedback>
 
       {successVisible && (
         <Animated.View
@@ -236,11 +252,21 @@ const styles = StyleSheet.create({
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     marginBottom: 16,
+    gap: 8,
+  },
+  dismissButton: {
+    padding: 8,
+  },
+  dismissLabel: {
+    color: colors.textMeta,
+    fontSize: 11,
+    letterSpacing: 2,
+    fontFamily: fonts.regular,
   },
   headerTitle: {
     ...typography.lg,
+    flex: 1,
     fontFamily: fonts.bold,
     color: colors.accent,
   },
