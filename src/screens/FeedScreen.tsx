@@ -165,6 +165,8 @@ export default function FeedScreen() {
         )}
       </View>
 
+      <View style={styles.headerDivider} />
+
       <FlatList
         data={allNotes}
         keyExtractor={item => item.noteId}
@@ -184,6 +186,7 @@ export default function FeedScreen() {
         ListEmptyComponent={
           <View style={styles.emptyState}>
             <Text style={styles.emptyText}>NO TRANSMISSIONS</Text>
+            <Text style={styles.emptySubtext}>MESH IS LISTENING</Text>
           </View>
         }
       />
@@ -243,8 +246,13 @@ const styles = StyleSheet.create({
     letterSpacing: 3,
     fontFamily: fonts.regular,
   },
+  headerDivider: {
+    height: 1,
+    backgroundColor: colors.border,
+  },
   listContent: {
     paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm,
     paddingBottom: spacing.lg,
   },
   listContentEmpty: {
@@ -254,12 +262,19 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: spacing.xxl,
   },
   emptyText: {
-    ...typography.sm,
     color: colors.textMeta,
+    fontSize: 11,
+    letterSpacing: 4,
+    fontFamily: fonts.regular,
+  },
+  emptySubtext: {
+    color: colors.textMeta,
+    fontSize: 9,
     letterSpacing: 3,
     fontFamily: fonts.regular,
+    opacity: 0.5,
+    marginTop: 8,
   },
 });

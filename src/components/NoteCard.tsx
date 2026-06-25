@@ -1,9 +1,8 @@
 import { StyleSheet, Text, View } from 'react-native';
 
 import { MAX_HOPS } from '../mesh/MeshContext';
-import { colors } from '../theme/colors';
+import { colors, getNoteTypeColor } from '../theme/colors';
 import { fonts } from '../theme/typography';
-import { spacing } from '../theme/spacing';
 import type { Note } from '../types/Note';
 
 interface NoteCardProps {
@@ -26,65 +25,105 @@ function getHopBadge(note: Note) {
   if (note.hopOrigin >= MAX_HOPS - 1) {
     return {
       label: `HOP ${note.hopOrigin} ⚠`,
-      style: styles.hopBadgeLimit,
+      color: colors.error,
     };
   }
 
   if (note.hopOrigin >= 2) {
     return {
       label: `HOP ${note.hopOrigin}`,
-      style: styles.hopBadgeTraveling,
+      color: colors.accent,
     };
   }
 
   if (note.hopOrigin === 1) {
     return {
       label: 'HOP 1',
-      style: styles.hopBadgeRelay,
+      color: colors.textSecondary,
     };
   }
 
   return {
     label: 'ORIGIN',
-    style: styles.hopBadgeOrigin,
+    color: colors.hopIndicator,
   };
 }
 
 export default function NoteCard({ note, isOwn, isGhost }: NoteCardProps) {
   const previewSuffix = note.body.length > note.preview.length ? '...' : '';
   const hopBadge = getHopBadge(note);
+  const typeColor = getNoteTypeColor(note.type);
+  const accentColor = isGhost ? colors.textMeta : typeColor;
+  const borderColor = isGhost
+    ? colors.border
+    : isOwn
+      ? `${typeColor}99`
+      : typeColor;
 
   return (
     <View
       style={[
         styles.card,
-        isGhost
-          ? styles.cardGhost
-          : isOwn
-            ? styles.cardOwn
-            : styles.cardReceived,
-        isOwn && !isGhost && styles.cardOwnAccent,
+        {
+          backgroundColor: isGhost ? colors.ghostNote : colors.surface,
+          borderColor,
+        },
       ]}>
-      <View style={styles.topRow}>
-        <Text style={styles.typeLabel}>{note.type.toUpperCase()}</Text>
-        <View style={styles.badgeRow}>
-          {isGhost && <Text style={styles.ghostIndicator}>SIGNAL LOST</Text>}
-          <Text style={[styles.hopBadge, hopBadge.style]}>{hopBadge.label}</Text>
+      <View style={styles.cardInner}>
+        <View
+          style={[
+            styles.accentBar,
+            {
+              backgroundColor: accentColor,
+            },
+          ]}
+        />
+        <View style={styles.cardContent}>
+          <View style={styles.topRow}>
+            <Text style={[styles.typeLabel, { color: accentColor }]}>
+              {note.type.toUpperCase()}
+            </Text>
+            <View style={styles.badgeRow}>
+              {isGhost && (
+                <Text style={styles.ghostIndicator}>SIGNAL LOST</Text>
+              )}
+              <Text style={[styles.hopBadge, { color: hopBadge.color }]}>
+                {hopBadge.label}
+              </Text>
+            </View>
+          </View>
+
+          {!isGhost && (
+            <View
+              style={[
+                styles.typeStrip,
+                { backgroundColor: `${typeColor}4D` },
+              ]}
+            />
+          )}
+
+          <Text
+            style={[
+              styles.title,
+              { color: isGhost ? colors.textSecondary : colors.textPrimary },
+            ]}>
+            {note.title}
+          </Text>
+          <Text style={styles.preview} numberOfLines={3}>
+            {note.preview}
+            {previewSuffix}
+          </Text>
+
+          <View style={styles.bottomRow}>
+            <Text style={styles.metaLeft}>
+              FROM {note.authorId.slice(0, 8).toUpperCase()}
+              {isOwn ? ' (YOU)' : ''}
+            </Text>
+            <Text style={styles.metaRight}>
+              {formatTimestamp(note.timestamp)}
+            </Text>
+          </View>
         </View>
-      </View>
-
-      <Text style={styles.title}>{note.title}</Text>
-      <Text style={styles.preview} numberOfLines={3}>
-        {note.preview}
-        {previewSuffix}
-      </Text>
-
-      <View style={styles.bottomRow}>
-        <Text style={styles.metaLeft}>
-          FROM {note.authorId.slice(0, 8).toUpperCase()}
-          {isOwn ? ' (YOU)' : ''}
-        </Text>
-        <Text style={styles.metaRight}>{formatTimestamp(note.timestamp)}</Text>
       </View>
     </View>
   );
@@ -93,25 +132,19 @@ export default function NoteCard({ note, isOwn, isGhost }: NoteCardProps) {
 const styles = StyleSheet.create({
   card: {
     borderWidth: 1,
-    borderRadius: 4,
-    padding: spacing.md,
-    marginBottom: spacing.sm,
+    borderRadius: 6,
+    marginBottom: 8,
+    overflow: 'hidden',
   },
-  cardOwn: {
-    backgroundColor: colors.surfaceAlt,
-    borderColor: colors.accentDim,
+  cardInner: {
+    flexDirection: 'row',
   },
-  cardReceived: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
+  accentBar: {
+    width: 3,
   },
-  cardGhost: {
-    backgroundColor: colors.ghostNote,
-    borderColor: colors.border,
-  },
-  cardOwnAccent: {
-    borderLeftWidth: 3,
-    borderLeftColor: colors.accent,
+  cardContent: {
+    flex: 1,
+    padding: 12,
   },
   topRow: {
     flexDirection: 'row',
@@ -121,10 +154,9 @@ const styles = StyleSheet.create({
   badgeRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
+    gap: 8,
   },
   typeLabel: {
-    color: colors.accent,
     fontSize: 10,
     letterSpacing: 3,
     fontFamily: fonts.bold,
@@ -140,35 +172,26 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
     fontFamily: fonts.regular,
   },
-  hopBadgeOrigin: {
-    color: colors.hopIndicator,
-  },
-  hopBadgeRelay: {
-    color: colors.textSecondary,
-  },
-  hopBadgeTraveling: {
-    color: colors.accent,
-  },
-  hopBadgeLimit: {
-    color: colors.error,
+  typeStrip: {
+    height: 1,
+    marginTop: 6,
   },
   title: {
-    color: colors.textPrimary,
-    fontSize: 14,
+    fontSize: 15,
     fontFamily: fonts.bold,
-    marginTop: spacing.xs,
+    marginTop: 6,
   },
   preview: {
     color: colors.textSecondary,
     fontSize: 12,
     fontFamily: fonts.regular,
-    marginTop: spacing.xs,
+    marginTop: 4,
   },
   bottomRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: spacing.sm,
+    marginTop: 10,
   },
   metaLeft: {
     color: colors.textMeta,
@@ -176,7 +199,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     fontFamily: fonts.regular,
     flexShrink: 1,
-    marginRight: spacing.sm,
+    marginRight: 8,
   },
   metaRight: {
     color: colors.textMeta,

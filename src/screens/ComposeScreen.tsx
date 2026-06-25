@@ -1,10 +1,10 @@
 import * as Crypto from 'expo-crypto';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
+  Animated,
   KeyboardAvoidingView,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -14,8 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { getOrCreateUserId } from '../identity/getOrCreateUserId';
 import { useMesh } from '../mesh/MeshContext';
-import { colors } from '../theme/colors';
-import { spacing } from '../theme/spacing';
+import { colors, getNoteTypeColor } from '../theme/colors';
 import { fonts, typography } from '../theme/typography';
 import type { Note, NoteType } from '../types/Note';
 
@@ -39,9 +38,27 @@ export default function ComposeScreen() {
   const [isBroadcasting, setIsBroadcasting] = useState(false);
   const [successVisible, setSuccessVisible] = useState(false);
   const [errorVisible, setErrorVisible] = useState(false);
+  const [successTypeColor, setSuccessTypeColor] = useState(colors.typeInformation);
+  const successOpacity = useRef(new Animated.Value(0)).current;
 
   const canBroadcast =
     title.trim().length > 0 && body.trim().length > 0 && !isBroadcasting;
+  const selectedTypeColor = getNoteTypeColor(selectedType);
+
+  function showSuccessFlash() {
+    setSuccessVisible(true);
+    successOpacity.setValue(1);
+
+    Animated.timing(successOpacity, {
+      toValue: 0,
+      duration: 1500,
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) {
+        setSuccessVisible(false);
+      }
+    });
+  }
 
   async function handleBroadcast() {
     if (!canBroadcast) {
@@ -69,14 +86,11 @@ export default function ComposeScreen() {
 
       await broadcastNote(note);
 
+      setSuccessTypeColor(getNoteTypeColor(selectedType));
       setTitle('');
       setBody('');
       setSelectedType('information');
-      setSuccessVisible(true);
-
-      setTimeout(() => {
-        setSuccessVisible(false);
-      }, 2000);
+      showSuccessFlash();
     } catch {
       setErrorVisible(true);
     } finally {
@@ -88,15 +102,14 @@ export default function ComposeScreen() {
     <KeyboardAvoidingView
       style={styles.flex}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-      <ScrollView
-        contentContainerStyle={[
+      <View
+        style={[
           styles.container,
           {
-            paddingTop: insets.top + spacing.md,
-            paddingBottom: insets.bottom + spacing.lg,
+            paddingTop: insets.top + 16,
+            paddingBottom: insets.bottom + 16,
           },
-        ]}
-        keyboardShouldPersistTaps="handled">
+        ]}>
         <View style={styles.headerRow}>
           <Text style={styles.headerTitle}>// COMPOSE</Text>
           <Pressable
@@ -105,7 +118,10 @@ export default function ComposeScreen() {
             style={[
               styles.broadcastButton,
               canBroadcast
-                ? styles.broadcastButtonActive
+                ? {
+                    backgroundColor: selectedTypeColor,
+                    borderColor: selectedTypeColor,
+                  }
                 : styles.broadcastButtonInactive,
             ]}>
             <Text
@@ -123,19 +139,29 @@ export default function ComposeScreen() {
         <View style={styles.typeRow}>
           {NOTE_TYPES.map(type => {
             const selected = selectedType === type;
+            const typeColor = getNoteTypeColor(type);
+
             return (
               <Pressable
                 key={type}
                 onPress={() => setSelectedType(type)}
                 style={[
                   styles.typePill,
-                  selected ? styles.typePillSelected : styles.typePillDefault,
+                  selected
+                    ? {
+                        backgroundColor: `${typeColor}33`,
+                        borderColor: typeColor,
+                      }
+                    : styles.typePillDefault,
                 ]}>
                 <Text
                   style={[
                     styles.typePillLabel,
                     selected
-                      ? styles.typePillLabelSelected
+                      ? {
+                          color: typeColor,
+                          fontFamily: fonts.bold,
+                        }
                       : styles.typePillLabelDefault,
                   ]}>
                   {type.toUpperCase()}
@@ -145,7 +171,7 @@ export default function ComposeScreen() {
           })}
         </View>
 
-        <View style={styles.fieldBlock}>
+        <View style={styles.titleBlock}>
           <TextInput
             value={title}
             onChangeText={value => setTitle(value.slice(0, TITLE_MAX))}
@@ -159,7 +185,7 @@ export default function ComposeScreen() {
           </Text>
         </View>
 
-        <View style={styles.fieldBlock}>
+        <View style={styles.bodyBlock}>
           <TextInput
             value={body}
             onChangeText={value => setBody(value.slice(0, BODY_MAX))}
@@ -175,13 +201,24 @@ export default function ComposeScreen() {
           </Text>
         </View>
 
-        {successVisible && (
-          <Text style={styles.successMessage}>// TRANSMITTED</Text>
-        )}
         {errorVisible && (
           <Text style={styles.errorMessage}>BROADCAST FAILED</Text>
         )}
-      </ScrollView>
+      </View>
+
+      {successVisible && (
+        <Animated.View
+          style={[styles.successOverlay, { opacity: successOpacity }]}
+          pointerEvents="none">
+          <Text
+            style={[
+              styles.successText,
+              { color: successTypeColor },
+            ]}>
+            // TRANSMITTED
+          </Text>
+        </Animated.View>
+      )}
     </KeyboardAvoidingView>
   );
 }
@@ -192,15 +229,15 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   container: {
-    flexGrow: 1,
+    flex: 1,
     backgroundColor: colors.background,
-    paddingHorizontal: spacing.md,
+    paddingHorizontal: 16,
   },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: spacing.md,
+    marginBottom: 16,
   },
   headerTitle: {
     ...typography.lg,
@@ -209,92 +246,98 @@ const styles = StyleSheet.create({
   },
   broadcastButton: {
     borderWidth: 1,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-  },
-  broadcastButtonActive: {
-    borderColor: colors.accent,
+    borderRadius: 4,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
   },
   broadcastButtonInactive: {
+    backgroundColor: 'transparent',
     borderColor: colors.border,
   },
   broadcastLabel: {
     fontSize: 11,
     letterSpacing: 3,
-    fontFamily: fonts.regular,
+    fontFamily: fonts.bold,
   },
   broadcastLabelActive: {
-    color: colors.accent,
+    color: colors.background,
   },
   broadcastLabelInactive: {
     color: colors.textMeta,
+    fontFamily: fonts.bold,
   },
   typeRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: spacing.xs,
-    marginBottom: spacing.lg,
+    gap: 8,
+    marginBottom: 24,
   },
   typePill: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-    borderRadius: 2,
-  },
-  typePillSelected: {
-    backgroundColor: colors.accent,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 4,
+    borderWidth: 1,
   },
   typePillDefault: {
     backgroundColor: colors.surfaceAlt,
+    borderColor: colors.border,
   },
   typePillLabel: {
     fontSize: 10,
-    letterSpacing: 2,
+    letterSpacing: 3,
     fontFamily: fonts.regular,
   },
-  typePillLabelSelected: {
-    color: colors.background,
-  },
   typePillLabelDefault: {
-    color: colors.textSecondary,
+    color: colors.textMeta,
+    fontFamily: fonts.regular,
   },
-  fieldBlock: {
-    marginBottom: spacing.lg,
+  titleBlock: {
+    marginBottom: 16,
   },
   titleInput: {
     ...typography.base,
+    fontFamily: fonts.regular,
     color: colors.textPrimary,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
-    paddingVertical: spacing.sm,
-    paddingRight: spacing.xl,
+    paddingVertical: 8,
+    paddingRight: 32,
   },
   titleCount: {
-    ...typography.xs,
+    fontSize: 10,
+    fontFamily: fonts.regular,
     color: colors.textMeta,
     alignSelf: 'flex-end',
-    marginTop: spacing.xs,
+    marginTop: 4,
+  },
+  bodyBlock: {
+    flex: 1,
   },
   bodyInput: {
-    ...typography.md,
+    flex: 1,
+    fontSize: 13,
+    fontFamily: fonts.regular,
     color: colors.textPrimary,
     borderWidth: 1,
     borderColor: colors.border,
-    minHeight: 144,
-    padding: spacing.sm,
-    paddingBottom: spacing.lg,
+    padding: 8,
   },
   bodyCount: {
-    ...typography.xs,
+    fontSize: 10,
+    fontFamily: fonts.regular,
     color: colors.textMeta,
     alignSelf: 'flex-end',
-    marginTop: spacing.xs,
+    marginTop: 4,
   },
-  successMessage: {
-    ...typography.lg,
+  successOverlay: {
+    ...StyleSheet.absoluteFill,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  successText: {
+    fontSize: 16,
+    letterSpacing: 3,
     fontFamily: fonts.bold,
-    color: colors.hopIndicator,
-    textAlign: 'center',
-    marginTop: spacing.md,
   },
   errorMessage: {
     fontSize: 11,
@@ -302,6 +345,6 @@ const styles = StyleSheet.create({
     fontFamily: fonts.regular,
     color: colors.error,
     textAlign: 'center',
-    marginTop: spacing.md,
+    marginTop: 16,
   },
 });

@@ -11,4 +11,23 @@ export const colors = {
   hopIndicator: '#3FB950',
   ghostNote: '#30363D',
   error: '#F85149',
+  typeEmergency: '#E5433D',
+  typeResource: '#3DAE6E',
+  typeInformation: '#4FACDE',
+  typeWaypoint: '#E5A030',
 };
+
+export function getNoteTypeColor(type: string): string {
+  switch (type) {
+    case 'emergency':
+      return colors.typeEmergency;
+    case 'resource':
+      return colors.typeResource;
+    case 'information':
+      return colors.typeInformation;
+    case 'waypoint':
+      return colors.typeWaypoint;
+    default:
+      return colors.textSecondary;
+  }
+}

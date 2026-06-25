@@ -12,11 +12,19 @@ export type RootTabParamList = {
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
 
-function TabIcon({ glyph, focused }: { glyph: string; focused: boolean }) {
+function TabIcon({
+  glyph,
+  focused,
+  fontSize,
+}: {
+  glyph: string;
+  focused: boolean;
+  fontSize: number;
+}) {
   return (
     <Text
       style={{
-        fontSize: 20,
+        fontSize,
         color: focused ? colors.accent : colors.textMeta,
       }}>
       {glyph}
@@ -35,7 +43,7 @@ export default function AppNavigator() {
           backgroundColor: colors.surface,
           borderTopColor: colors.border,
           borderTopWidth: 1,
-          height: 56,
+          height: 60,
         },
         tabBarActiveTintColor: colors.accent,
         tabBarInactiveTintColor: colors.textMeta,
@@ -45,7 +53,7 @@ export default function AppNavigator() {
         component={FeedScreen}
         options={{
           tabBarIcon: ({ focused }) => (
-            <TabIcon glyph="▣" focused={focused} />
+            <TabIcon glyph="▣" focused={focused} fontSize={18} />
           ),
         }}
       />
@@ -54,7 +62,7 @@ export default function AppNavigator() {
         component={ComposeScreen}
         options={{
           tabBarIcon: ({ focused }) => (
-            <TabIcon glyph="⊕" focused={focused} />
+            <TabIcon glyph="⊕" focused={focused} fontSize={22} />
           ),
         }}
       />
