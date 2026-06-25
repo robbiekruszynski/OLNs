@@ -18,9 +18,39 @@ import { fonts } from '../theme/typography';
 const NODE_COUNT = 12;
 const NODE_DIAMETER = 6;
 const NODE_RADIUS = 3;
+const ORIGIN_DIAMETER = 10;
+const ORIGIN_RADIUS = 5;
 const PULSE_START_RADIUS = 4;
 const PULSE_END_RADIUS = 60;
-const CONNECTION_MAX_PER_NODE = 3;
+const CONNECTION_LINE_MIN_OPACITY = 0.08;
+const CONNECTION_LINE_MAX_OPACITY = 0.16;
+
+const NODE_POSITIONS = [
+  { x: 0.15, y: 0.08 },
+  { x: 0.75, y: 0.12 },
+  { x: 0.88, y: 0.28 },
+  { x: 0.08, y: 0.35 },
+  { x: 0.55, y: 0.18 },
+  { x: 0.92, y: 0.52 },
+  { x: 0.05, y: 0.62 },
+  { x: 0.35, y: 0.72 },
+  { x: 0.78, y: 0.68 },
+  { x: 0.22, y: 0.88 },
+  { x: 0.65, y: 0.85 },
+  { x: 0.48, y: 0.42, isOrigin: true },
+] as const;
+
+const MESH_EDGES: ReadonlyArray<readonly [number, number]> = [
+  [11, 4],
+  [11, 3],
+  [11, 7],
+  [11, 8],
+  [0, 3],
+  [1, 4],
+  [3, 7],
+  [6, 7],
+  [8, 10],
+];
 
 interface NodeData {
   id: number;
@@ -40,87 +70,47 @@ interface ConnectionData {
 }
 
 function createNodes(width: number, height: number): NodeData[] {
-  const centerX = width / 2;
-  const centerY = height / 2;
-  const spread = Math.min(width, height) * 0.38;
-  const nodes: NodeData[] = [
-    {
-      id: 0,
-      x: centerX,
-      y: centerY,
-      baseOpacity: 0.9,
-      pulseDuration: 2800,
-      isOrigin: true,
-    },
-  ];
-
-  for (let index = 1; index < NODE_COUNT; index += 1) {
-    const angle = Math.random() * Math.PI * 2;
-    const distance = Math.pow(Math.random(), 0.65) * spread;
-
-    nodes.push({
-      id: index,
-      x: centerX + Math.cos(angle) * distance,
-      y: centerY + Math.sin(angle) * distance,
-      baseOpacity: 0.4 + Math.random() * 0.6,
-      pulseDuration: 2000 + Math.random() * 2000,
-      isOrigin: false,
-    });
-  }
-
-  return nodes;
+  return NODE_POSITIONS.map((position, id) => ({
+    id,
+    x: position.x * width,
+    y: position.y * height,
+    baseOpacity: 'isOrigin' in position ? 1 : 0.4 + (id % 6) * 0.1,
+    pulseDuration: 2000 + (id * 173) % 2000,
+    isOrigin: 'isOrigin' in position && position.isOrigin === true,
+  }));
 }
 
-function createConnections(
-  nodes: NodeData[],
-  maxDistance: number,
-): ConnectionData[] {
-  const degrees = nodes.map(() => 0);
-  const pairs: { i: number; j: number; dist: number }[] = [];
+function createConnections(nodes: NodeData[]): ConnectionData[] {
+  const maxDistance = Math.max(
+    ...MESH_EDGES.map(([from, to]) =>
+      Math.hypot(nodes[from].x - nodes[to].x, nodes[from].y - nodes[to].y),
+    ),
+    1,
+  );
 
-  for (let i = 0; i < nodes.length; i += 1) {
-    for (let j = i + 1; j < nodes.length; j += 1) {
-      const dist = Math.hypot(nodes[i].x - nodes[j].x, nodes[i].y - nodes[j].y);
-      if (dist <= maxDistance) {
-        pairs.push({ i, j, dist });
-      }
-    }
-  }
+  return MESH_EDGES.map(([from, to]) => {
+    const distance = Math.hypot(
+      nodes[from].x - nodes[to].x,
+      nodes[from].y - nodes[to].y,
+    );
+    const proximity = 1 - distance / maxDistance;
 
-  pairs.sort((a, b) => a.dist - b.dist);
+    const isHubEdge = nodes[from].isOrigin || nodes[to].isOrigin;
+    const baseOpacity =
+      CONNECTION_LINE_MIN_OPACITY +
+      proximity * (CONNECTION_LINE_MAX_OPACITY - CONNECTION_LINE_MIN_OPACITY);
 
-  const connections: ConnectionData[] = [];
-
-  for (const pair of pairs) {
-    if (
-      degrees[pair.i] >= CONNECTION_MAX_PER_NODE ||
-      degrees[pair.j] >= CONNECTION_MAX_PER_NODE
-    ) {
-      continue;
-    }
-
-    degrees[pair.i] += 1;
-    degrees[pair.j] += 1;
-
-    connections.push({
-      x1: nodes[pair.i].x,
-      y1: nodes[pair.i].y,
-      x2: nodes[pair.j].x,
-      y2: nodes[pair.j].y,
-      opacity: 0.3 * (1 - pair.dist / maxDistance),
-    });
-  }
-
-  return connections;
+    return {
+      x1: nodes[from].x,
+      y1: nodes[from].y,
+      x2: nodes[to].x,
+      y2: nodes[to].y,
+      opacity: isHubEdge ? Math.min(baseOpacity + 0.03, 0.19) : baseOpacity,
+    };
+  });
 }
 
-function MeshConnection({
-  connection,
-  linesOpacity,
-}: {
-  connection: ConnectionData;
-  linesOpacity: Animated.Value;
-}) {
+function MeshConnection({ connection }: { connection: ConnectionData }) {
   const length = Math.hypot(
     connection.x2 - connection.x1,
     connection.y2 - connection.y1,
@@ -133,14 +123,14 @@ function MeshConnection({
   const midY = (connection.y1 + connection.y2) / 2;
 
   return (
-    <Animated.View
+    <View
       style={[
         styles.connectionLine,
         {
           left: midX - length / 2,
-          top: midY,
+          top: midY - 0.75,
           width: length,
-          opacity: Animated.multiply(linesOpacity, connection.opacity),
+          opacity: connection.opacity,
           transform: [{ rotate: `${angle}rad` }],
         },
       ]}
@@ -155,10 +145,7 @@ export default function HomeScreen() {
   const [isJoining, setIsJoining] = useState(false);
 
   const nodes = useMemo(() => createNodes(width, height), [width, height]);
-  const connections = useMemo(
-    () => createConnections(nodes, Math.min(width, height) * 0.28),
-    [nodes, width, height],
-  );
+  const connections = useMemo(() => createConnections(nodes), [nodes]);
 
   const originNode = nodes.find(node => node.isOrigin) ?? nodes[0];
 
@@ -205,25 +192,32 @@ export default function HomeScreen() {
       }).start();
     }, 800);
 
-    pulseLoops.current = pulseAnims.map((anim, index) => {
-      const loop = Animated.loop(
-        Animated.sequence([
-          Animated.timing(anim, {
-            toValue: 1,
-            duration: nodes[index].pulseDuration / 2,
-            useNativeDriver: true,
-          }),
-          Animated.timing(anim, {
-            toValue: 0.65,
-            duration: nodes[index].pulseDuration / 2,
-            useNativeDriver: true,
-          }),
-        ]),
-      );
+    pulseLoops.current = pulseAnims
+      .map((anim, index) => {
+        if (nodes[index].isOrigin) {
+          anim.setValue(1);
+          return null;
+        }
 
-      loop.start();
-      return loop;
-    });
+        const loop = Animated.loop(
+          Animated.sequence([
+            Animated.timing(anim, {
+              toValue: 1,
+              duration: nodes[index].pulseDuration / 2,
+              useNativeDriver: true,
+            }),
+            Animated.timing(anim, {
+              toValue: 0.65,
+              duration: nodes[index].pulseDuration / 2,
+              useNativeDriver: true,
+            }),
+          ]),
+        );
+
+        loop.start();
+        return loop;
+      })
+      .filter((loop): loop is Animated.CompositeAnimation => loop !== null);
 
     function runOriginPulse() {
       pulseProgress.setValue(0);
@@ -306,13 +300,11 @@ export default function HomeScreen() {
   return (
     <View style={styles.container}>
       <View style={[styles.meshCanvas, { width, height }]}>
-        {connections.map((connection, index) => (
-          <MeshConnection
-            key={`line-${index}`}
-            connection={connection}
-            linesOpacity={linesOpacity}
-          />
-        ))}
+        <Animated.View style={[styles.connectionsLayer, { opacity: linesOpacity }]}>
+          {connections.map((connection, index) => (
+            <MeshConnection key={`line-${index}`} connection={connection} />
+          ))}
+        </Animated.View>
 
         <Animated.View
           style={[
@@ -326,26 +318,42 @@ export default function HomeScreen() {
           ]}
         />
 
-        {nodes.map((node, index) => (
-          <Animated.View
-            key={node.id}
-            style={[
-              styles.node,
-              {
-                left: node.x - NODE_RADIUS,
-                top: node.y - NODE_RADIUS,
-                opacity: Animated.multiply(
-                  Animated.multiply(fadeAnims[index], pulseAnims[index]),
-                  baseOpacityAnims[index],
-                ),
-              },
-            ]}
-          />
-        ))}
+        {nodes.map((node, index) => {
+          const nodeRadius = node.isOrigin ? ORIGIN_RADIUS : NODE_RADIUS;
+          const nodeDiameter = node.isOrigin ? ORIGIN_DIAMETER : NODE_DIAMETER;
+          const nodeOpacity = node.isOrigin
+            ? fadeAnims[index]
+            : Animated.multiply(
+                Animated.multiply(fadeAnims[index], pulseAnims[index]),
+                baseOpacityAnims[index],
+              );
+
+          return (
+            <Animated.View
+              key={node.id}
+              style={[
+                styles.node,
+                {
+                  left: node.x - nodeRadius,
+                  top: node.y - nodeRadius,
+                  width: nodeDiameter,
+                  height: nodeDiameter,
+                  borderRadius: nodeRadius,
+                  opacity: nodeOpacity,
+                },
+              ]}
+            />
+          );
+        })}
       </View>
 
-      <View style={styles.identityOverlay} pointerEvents="none">
-        <Text style={styles.title}>// OLNs</Text>
+      <View
+        style={[
+          styles.identityOverlay,
+          { top: height * 0.35, bottom: height * 0.35 },
+        ]}
+        pointerEvents="none">
+        <Text style={styles.title}>OLNs</Text>
         <Text style={styles.subtitle}>OFFLINE NOTE NETWORK</Text>
         <Text style={styles.tagline}>
           peer-to-peer · mesh relay · no infrastructure
@@ -357,7 +365,7 @@ export default function HomeScreen() {
           styles.bottomSection,
           { bottom: 80 + insets.bottom },
         ]}>
-        <Text style={styles.hint}>BLUETOOTH REQUIRED</Text>
+        <Text style={styles.hint}>BLE · MESH · OFFLINE</Text>
         <Animated.View style={{ opacity: buttonOpacity }}>
           <Pressable
             onPress={handleJoinMesh}
@@ -366,7 +374,15 @@ export default function HomeScreen() {
               styles.joinButton,
               pressed && styles.joinButtonPressed,
             ]}>
-            <Text style={styles.joinLabel}>JOIN MESH</Text>
+            {({ pressed }) => (
+              <Text
+                style={[
+                  styles.joinLabel,
+                  pressed && styles.joinLabelPressed,
+                ]}>
+                JOIN MESH
+              </Text>
+            )}
           </Pressable>
         </Animated.View>
       </View>
@@ -384,6 +400,9 @@ const styles = StyleSheet.create({
     left: 0,
     top: 0,
   },
+  connectionsLayer: {
+    ...StyleSheet.absoluteFill,
+  },
   connectionLine: {
     position: 'absolute',
     height: 1,
@@ -400,13 +419,12 @@ const styles = StyleSheet.create({
   },
   node: {
     position: 'absolute',
-    width: NODE_DIAMETER,
-    height: NODE_DIAMETER,
-    borderRadius: NODE_RADIUS,
     backgroundColor: colors.accent,
   },
   identityOverlay: {
-    ...StyleSheet.absoluteFill,
+    position: 'absolute',
+    left: 0,
+    right: 0,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -451,15 +469,18 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     paddingVertical: 14,
     paddingHorizontal: 48,
-    backgroundColor: 'transparent',
+    backgroundColor: colors.accentDim,
   },
   joinButtonPressed: {
-    backgroundColor: colors.accentDim,
+    backgroundColor: colors.accent,
   },
   joinLabel: {
     fontFamily: fonts.bold,
     fontSize: 13,
     color: colors.accent,
     letterSpacing: 4,
+  },
+  joinLabelPressed: {
+    color: colors.background,
   },
 });
