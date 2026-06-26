@@ -22,13 +22,17 @@ const NODE_DIAMETER = 6;
 const NODE_RADIUS = 3;
 const ORIGIN_DIAMETER = 10;
 const ORIGIN_RADIUS = 5;
-const PACKET_DIAMETER = 4;
-const PACKET_RADIUS = 2;
+const PACKET_DIAMETER = 3;
+const PACKET_RADIUS = 1.5;
 const PULSE_START_RADIUS = 5;
 const PULSE_END_RADIUS = 80;
-const CONNECTION_MAX_OPACITY = 0.35;
+const BIRTH_RING_END_RADIUS = 28;
+const CONNECTION_MAX_OPACITY = 0.25;
 const MIN_ACTIVE_CONNECTIONS = 3;
 const MAX_ACTIVE_CONNECTIONS = 5;
+const MAX_SIMULTANEOUS_BIRTHS = 2;
+
+type NodePhase = 'dormant' | 'birth' | 'life' | 'death';
 
 const NODE_POSITIONS = [
   { x: 0.12, y: 0.06 },
@@ -42,7 +46,7 @@ const NODE_POSITIONS = [
   { x: 0.82, y: 0.71 },
   { x: 0.18, y: 0.91 },
   { x: 0.68, y: 0.88 },
-  { x: 0.46, y: 0.44, isOrigin: true },
+  { x: 0.5, y: 0.31, isOrigin: true },
 ] as const;
 
 const LANGUAGES = [
@@ -91,7 +95,6 @@ interface NodeData {
   id: number;
   x: number;
   y: number;
-  pulseDuration: number;
   isOrigin: boolean;
 }
 
@@ -119,7 +122,6 @@ function createNodes(width: number, height: number): NodeData[] {
     id,
     x: position.x * width,
     y: position.y * height,
-    pulseDuration: 1500 + ((id * 127) % 1500),
     isOrigin: 'isOrigin' in position && position.isOrigin === true,
   }));
 }
@@ -205,15 +207,34 @@ export default function HomeScreen() {
   const nodes = useMemo(() => createNodes(width, height), [width, height]);
   const originNode = nodes.find(node => node.isOrigin) ?? nodes[0];
 
-  const pulseAnims = useRef(
-    Array.from({ length: NODE_COUNT }, () => new Animated.Value(0.65)),
+  const nodeOpacities = useRef(
+    Array.from({ length: NODE_COUNT }, () => new Animated.Value(0)),
+  ).current;
+  const birthRingScales = useRef(
+    Array.from({ length: NODE_COUNT }, () => new Animated.Value(0)),
+  ).current;
+  const birthRingOpacities = useRef(
+    Array.from({ length: NODE_COUNT }, () => new Animated.Value(0)),
   ).current;
   const pulseProgress = useRef(new Animated.Value(0)).current;
   const pulseRingOpacity = useRef(new Animated.Value(0)).current;
   const buttonOpacity = useRef(new Animated.Value(1)).current;
 
+  const nodePhaseRef = useRef<NodePhase[]>(
+    Array.from({ length: NODE_COUNT }, () => 'dormant' as NodePhase),
+  );
+  const nodeMetaRef = useRef(
+    Array.from({ length: NODE_COUNT }, () => ({
+      settled: 0.75,
+      breathDuration: 3000,
+    })),
+  );
   const connectionsRef = useRef<Map<string, ActiveConnection>>(new Map());
-  const pulseLoops = useRef<Animated.CompositeAnimation[]>([]);
+  const breathLoops = useRef<Array<Animated.CompositeAnimation | null>>(
+    Array.from({ length: NODE_COUNT }, () => null),
+  );
+  const nodeTimeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const birthingCountRef = useRef(0);
   const connectionIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
     null,
   );
@@ -222,37 +243,83 @@ export default function HomeScreen() {
   const joinTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isMountedRef = useRef(true);
 
-  const startConnection = useCallback((from: number, to: number) => {
-    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const opacity = new Animated.Value(0);
-    const connection: ActiveConnection = { id, from, to, opacity };
+  const isNodeInLifePhase = useCallback((index: number) => {
+    return nodePhaseRef.current[index] === 'life';
+  }, []);
 
-    connectionsRef.current.set(id, connection);
-    setActiveConnections(Array.from(connectionsRef.current.values()));
+  const scheduleNodeTimeout = useCallback((callback: () => void, delay: number) => {
+    const timeout = setTimeout(callback, delay);
+    nodeTimeoutsRef.current.push(timeout);
+    return timeout;
+  }, []);
 
-    const holdDuration = 800 + Math.random() * 700;
+  const stopNodeBreath = useCallback((index: number) => {
+    breathLoops.current[index]?.stop();
+    breathLoops.current[index] = null;
+  }, []);
 
-    Animated.sequence([
-      Animated.timing(opacity, {
-        toValue: CONNECTION_MAX_OPACITY,
-        duration: 600,
-        useNativeDriver: true,
-      }),
-      Animated.delay(holdDuration),
-      Animated.timing(opacity, {
-        toValue: 0,
-        duration: 600,
-        useNativeDriver: true,
-      }),
-    ]).start(({ finished }) => {
-      if (!finished || !isMountedRef.current) {
+  const startNodeBreath = useCallback((index: number) => {
+    const { settled, breathDuration } = nodeMetaRef.current[index];
+    stopNodeBreath(index);
+    nodeOpacities[index].setValue(settled);
+
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(nodeOpacities[index], {
+          toValue: Math.min(settled + 0.2, 1),
+          duration: breathDuration / 2,
+          useNativeDriver: true,
+        }),
+        Animated.timing(nodeOpacities[index], {
+          toValue: Math.max(settled - 0.2, 0),
+          duration: breathDuration / 2,
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+
+    breathLoops.current[index] = loop;
+    loop.start();
+  }, [nodeOpacities, stopNodeBreath]);
+
+  const startConnection = useCallback(
+    (from: number, to: number) => {
+      if (!isNodeInLifePhase(from) || !isNodeInLifePhase(to)) {
         return;
       }
 
-      connectionsRef.current.delete(id);
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const opacity = new Animated.Value(0);
+      const connection: ActiveConnection = { id, from, to, opacity };
+
+      connectionsRef.current.set(id, connection);
       setActiveConnections(Array.from(connectionsRef.current.values()));
-    });
-  }, []);
+
+      const holdDuration = 600 + Math.random() * 600;
+
+      Animated.sequence([
+        Animated.timing(opacity, {
+          toValue: CONNECTION_MAX_OPACITY,
+          duration: 400,
+          useNativeDriver: true,
+        }),
+        Animated.delay(holdDuration),
+        Animated.timing(opacity, {
+          toValue: 0,
+          duration: 400,
+          useNativeDriver: true,
+        }),
+      ]).start(({ finished }) => {
+        if (!finished || !isMountedRef.current) {
+          return;
+        }
+
+        connectionsRef.current.delete(id);
+        setActiveConnections(Array.from(connectionsRef.current.values()));
+      });
+    },
+    [isNodeInLifePhase],
+  );
 
   const spawnConnections = useCallback(() => {
     const activeCount = connectionsRef.current.size;
@@ -280,7 +347,11 @@ export default function HomeScreen() {
 
       for (let i = 0; i < NODE_COUNT; i += 1) {
         for (let j = i + 1; j < NODE_COUNT; j += 1) {
-          if (!activePairs.has(getPairKey(i, j))) {
+          if (
+            !activePairs.has(getPairKey(i, j)) &&
+            isNodeInLifePhase(i) &&
+            isNodeInLifePhase(j)
+          ) {
             candidates.push([i, j]);
           }
         }
@@ -294,10 +365,13 @@ export default function HomeScreen() {
       activePairs.add(getPairKey(pair[0], pair[1]));
       startConnection(pair[0], pair[1]);
     }
-  }, [startConnection]);
+  }, [isNodeInLifePhase, startConnection]);
 
   const spawnDataPacket = useCallback(() => {
-    const connections = Array.from(connectionsRef.current.values());
+    const connections = Array.from(connectionsRef.current.values()).filter(
+      connection =>
+        isNodeInLifePhase(connection.from) && isNodeInLifePhase(connection.to),
+    );
     if (connections.length === 0) {
       return;
     }
@@ -305,8 +379,9 @@ export default function HomeScreen() {
     const connection =
       connections[Math.floor(Math.random() * connections.length)];
     const progress = new Animated.Value(0);
-    const opacity = new Animated.Value(0.8);
+    const opacity = new Animated.Value(0.7);
     const id = `packet-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const travelDuration = 600 + Math.random() * 400;
     const packet: DataPacket = {
       id,
       from: connection.from,
@@ -320,12 +395,12 @@ export default function HomeScreen() {
     Animated.parallel([
       Animated.timing(progress, {
         toValue: 1,
-        duration: 800,
+        duration: travelDuration,
         useNativeDriver: true,
       }),
       Animated.timing(opacity, {
         toValue: 0,
-        duration: 800,
+        duration: travelDuration,
         useNativeDriver: true,
       }),
     ]).start(({ finished }) => {
@@ -335,37 +410,106 @@ export default function HomeScreen() {
 
       setDataPackets(current => current.filter(item => item.id !== id));
     });
-  }, []);
+  }, [isNodeInLifePhase]);
 
   useEffect(() => {
     isMountedRef.current = true;
+    nodeTimeoutsRef.current = [];
+    birthingCountRef.current = 0;
+    nodePhaseRef.current = Array.from(
+      { length: NODE_COUNT },
+      () => 'dormant' as NodePhase,
+    );
 
-    pulseLoops.current = pulseAnims
-      .map((anim, index) => {
-        if (nodes[index].isOrigin) {
-          anim.setValue(1);
-          return null;
+    const birthNode = (index: number) => {
+      if (!isMountedRef.current || nodes[index].isOrigin) {
+        return;
+      }
+
+      if (birthingCountRef.current >= MAX_SIMULTANEOUS_BIRTHS) {
+        scheduleNodeTimeout(() => birthNode(index), 250);
+        return;
+      }
+
+      birthingCountRef.current += 1;
+      nodePhaseRef.current[index] = 'birth';
+
+      const settled = 0.6 + Math.random() * 0.3;
+      const breathDuration = 2500 + Math.random() * 2000;
+      const lifespan = 6000 + Math.random() * 8000;
+      nodeMetaRef.current[index] = { settled, breathDuration };
+
+      nodeOpacities[index].setValue(0);
+      birthRingScales[index].setValue(NODE_RADIUS / BIRTH_RING_END_RADIUS);
+      birthRingOpacities[index].setValue(0.6);
+
+      Animated.parallel([
+        Animated.timing(nodeOpacities[index], {
+          toValue: 0.8,
+          duration: 600,
+          useNativeDriver: true,
+        }),
+        Animated.timing(birthRingScales[index], {
+          toValue: 1,
+          duration: 700,
+          useNativeDriver: true,
+        }),
+        Animated.timing(birthRingOpacities[index], {
+          toValue: 0,
+          duration: 700,
+          useNativeDriver: true,
+        }),
+      ]).start(({ finished }) => {
+        birthingCountRef.current = Math.max(0, birthingCountRef.current - 1);
+
+        if (!finished || !isMountedRef.current) {
+          return;
         }
 
-        const loop = Animated.loop(
-          Animated.sequence([
-            Animated.timing(anim, {
-              toValue: 1,
-              duration: nodes[index].pulseDuration / 2,
-              useNativeDriver: true,
-            }),
-            Animated.timing(anim, {
-              toValue: 0.65,
-              duration: nodes[index].pulseDuration / 2,
-              useNativeDriver: true,
-            }),
-          ]),
-        );
+        nodePhaseRef.current[index] = 'life';
+        startNodeBreath(index);
 
-        loop.start();
-        return loop;
-      })
-      .filter((loop): loop is Animated.CompositeAnimation => loop !== null);
+        scheduleNodeTimeout(() => {
+          if (nodePhaseRef.current[index] !== 'life') {
+            return;
+          }
+
+          nodePhaseRef.current[index] = 'death';
+          stopNodeBreath(index);
+
+          Animated.timing(nodeOpacities[index], {
+            toValue: 0,
+            duration: 800,
+            useNativeDriver: true,
+          }).start(({ finished: deathFinished }) => {
+            if (!deathFinished || !isMountedRef.current) {
+              return;
+            }
+
+            nodePhaseRef.current[index] = 'dormant';
+            scheduleNodeTimeout(
+              () => birthNode(index),
+              1000 + Math.random() * 2000,
+            );
+          });
+        }, lifespan);
+      });
+    };
+
+    const startOriginLife = () => {
+      const originIndex = nodes.findIndex(node => node.isOrigin);
+      if (originIndex < 0) {
+        return;
+      }
+
+      nodePhaseRef.current[originIndex] = 'life';
+      nodeMetaRef.current[originIndex] = {
+        settled: 1,
+        breathDuration: 2500 + Math.random() * 2000,
+      };
+      nodeOpacities[originIndex].setValue(1);
+      startNodeBreath(originIndex);
+    };
 
     function runOriginPulse() {
       pulseProgress.setValue(0);
@@ -385,16 +529,29 @@ export default function HomeScreen() {
       ]).start();
     }
 
+    startOriginLife();
     runOriginPulse();
     pulseIntervalRef.current = setInterval(runOriginPulse, 4000);
 
+    let staggerDelay = 0;
+    nodes.forEach(node => {
+      if (node.isOrigin) {
+        return;
+      }
+
+      scheduleNodeTimeout(() => birthNode(node.id), staggerDelay);
+      staggerDelay += 300;
+    });
+
     spawnConnections();
     connectionIntervalRef.current = setInterval(spawnConnections, 1200);
-    packetIntervalRef.current = setInterval(spawnDataPacket, 3000);
+    packetIntervalRef.current = setInterval(spawnDataPacket, 2500);
 
     return () => {
       isMountedRef.current = false;
-      pulseLoops.current.forEach(loop => loop.stop());
+      nodeTimeoutsRef.current.forEach(timeout => clearTimeout(timeout));
+      nodeTimeoutsRef.current = [];
+      breathLoops.current.forEach(loop => loop?.stop());
       if (connectionIntervalRef.current) {
         clearInterval(connectionIntervalRef.current);
       }
@@ -407,11 +564,26 @@ export default function HomeScreen() {
       if (joinTimeoutRef.current) {
         clearTimeout(joinTimeoutRef.current);
       }
+      nodeOpacities.forEach(opacity => opacity.stopAnimation());
+      birthRingScales.forEach(scale => scale.stopAnimation());
+      birthRingOpacities.forEach(opacity => opacity.stopAnimation());
       pulseProgress.stopAnimation();
       pulseRingOpacity.stopAnimation();
       connectionsRef.current.clear();
     };
-  }, [nodes, pulseAnims, pulseProgress, pulseRingOpacity, spawnConnections, spawnDataPacket]);
+  }, [
+    birthRingOpacities,
+    birthRingScales,
+    nodeOpacities,
+    nodes,
+    pulseProgress,
+    pulseRingOpacity,
+    scheduleNodeTimeout,
+    spawnConnections,
+    spawnDataPacket,
+    startNodeBreath,
+    stopNodeBreath,
+  ]);
 
   const pulseScale = pulseProgress.interpolate({
     inputRange: [0, 1],
@@ -432,8 +604,8 @@ export default function HomeScreen() {
     }).start();
 
     Animated.parallel(
-      pulseAnims.map(anim =>
-        Animated.timing(anim, {
+      nodeOpacities.map(opacity =>
+        Animated.timing(opacity, {
           toValue: 1,
           duration: 200,
           useNativeDriver: true,
@@ -476,9 +648,29 @@ export default function HomeScreen() {
         ))}
 
         {nodes.map((node, index) => {
+          if (node.isOrigin) {
+            return null;
+          }
+
+          return (
+            <Animated.View
+              key={`birth-ring-${node.id}`}
+              style={[
+                styles.birthRing,
+                {
+                  left: node.x - BIRTH_RING_END_RADIUS,
+                  top: node.y - BIRTH_RING_END_RADIUS,
+                  opacity: birthRingOpacities[index],
+                  transform: [{ scale: birthRingScales[index] }],
+                },
+              ]}
+            />
+          );
+        })}
+
+        {nodes.map((node, index) => {
           const nodeRadius = node.isOrigin ? ORIGIN_RADIUS : NODE_RADIUS;
           const nodeDiameter = node.isOrigin ? ORIGIN_DIAMETER : NODE_DIAMETER;
-          const nodeOpacity = node.isOrigin ? 1 : pulseAnims[index];
 
           return (
             <Animated.View
@@ -491,7 +683,7 @@ export default function HomeScreen() {
                   width: nodeDiameter,
                   height: nodeDiameter,
                   borderRadius: nodeRadius,
-                  opacity: nodeOpacity,
+                  opacity: nodeOpacities[index],
                 },
               ]}
             />
@@ -666,6 +858,15 @@ const styles = StyleSheet.create({
     height: PULSE_END_RADIUS * 2,
     borderRadius: PULSE_END_RADIUS,
     borderWidth: 1,
+    borderColor: colors.accent,
+    backgroundColor: 'transparent',
+  },
+  birthRing: {
+    position: 'absolute',
+    width: BIRTH_RING_END_RADIUS * 2,
+    height: BIRTH_RING_END_RADIUS * 2,
+    borderRadius: BIRTH_RING_END_RADIUS,
+    borderWidth: 0.8,
     borderColor: colors.accent,
     backgroundColor: 'transparent',
   },
