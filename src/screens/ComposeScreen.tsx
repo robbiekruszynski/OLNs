@@ -1,11 +1,12 @@
 import * as Crypto from 'expo-crypto';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { useNavigation } from '@react-navigation/native';
-import { useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   Keyboard,
   KeyboardAvoidingView,
+  PanResponder,
   Platform,
   Pressable,
   StyleSheet,
@@ -18,17 +19,18 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { getOrCreateUserId } from '../identity/getOrCreateUserId';
 import { useMesh } from '../mesh/MeshContext';
 import type { RootTabParamList } from '../navigation/AppNavigator';
-import { colors, getNoteTypeColor } from '../theme/colors';
+import { colors } from '../theme/colors';
 import { fonts } from '../theme/typography';
 import type { Note, NoteType } from '../types/Note';
 
-const NOTE_TYPES: NoteType[] = [
-  'emergency',
-  'resource',
-  'information',
-  'waypoint',
+const NOTE_TYPES = [
+  { type: 'emergency' as NoteType, label: 'EMERGENCY', color: '#E5433D' },
+  { type: 'resource' as NoteType, label: 'RESOURCE', color: '#3DAE6E' },
+  { type: 'information' as NoteType, label: 'INFORMATION', color: '#4FACDE' },
+  { type: 'waypoint' as NoteType, label: 'WAYPOINT', color: '#E5A030' },
 ];
 
+const DEFAULT_TYPE_INDEX = 2;
 const TITLE_MAX = 80;
 const BODY_MAX = 1000;
 
@@ -37,18 +39,114 @@ export default function ComposeScreen() {
   const navigation = useNavigation<BottomTabNavigationProp<RootTabParamList>>();
   const { broadcastNote } = useMesh();
 
-  const [selectedType, setSelectedType] = useState<NoteType>('information');
+  const [selectedIndex, setSelectedIndex] = useState(DEFAULT_TYPE_INDEX);
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [isBroadcasting, setIsBroadcasting] = useState(false);
   const [successVisible, setSuccessVisible] = useState(false);
   const [errorVisible, setErrorVisible] = useState(false);
-  const [successTypeColor, setSuccessTypeColor] = useState(colors.typeInformation);
+  const [successTypeColor, setSuccessTypeColor] = useState(
+    NOTE_TYPES[DEFAULT_TYPE_INDEX].color,
+  );
+
   const successOverlayOpacity = useRef(new Animated.Value(0)).current;
+  const labelOpacity = useRef(new Animated.Value(1)).current;
+  const moodTintOpacity = useRef(new Animated.Value(0.04)).current;
+  const dotWidths = useRef(
+    NOTE_TYPES.map((_, index) =>
+      new Animated.Value(index === DEFAULT_TYPE_INDEX ? 16 : 5),
+    ),
+  ).current;
+  const selectedIndexRef = useRef(DEFAULT_TYPE_INDEX);
+
+  const selectedType = NOTE_TYPES[selectedIndex];
+  const currentTypeColor = selectedType.color;
 
   const canBroadcast =
     title.trim().length > 0 && body.trim().length > 0 && !isBroadcasting;
-  const selectedTypeColor = getNoteTypeColor(selectedType);
+
+  selectedIndexRef.current = selectedIndex;
+
+  const goToIndex = useCallback(
+    (nextIndex: number) => {
+      const currentIndex = selectedIndexRef.current;
+      if (nextIndex === currentIndex) {
+        return;
+      }
+
+      Animated.timing(labelOpacity, {
+        toValue: 0,
+        duration: 120,
+        useNativeDriver: true,
+      }).start(({ finished }) => {
+        if (!finished) {
+          return;
+        }
+
+        setSelectedIndex(nextIndex);
+        selectedIndexRef.current = nextIndex;
+
+        Animated.parallel([
+          Animated.timing(dotWidths[currentIndex], {
+            toValue: 5,
+            duration: 150,
+            useNativeDriver: false,
+          }),
+          Animated.timing(dotWidths[nextIndex], {
+            toValue: 16,
+            duration: 150,
+            useNativeDriver: false,
+          }),
+          Animated.sequence([
+            Animated.timing(moodTintOpacity, {
+              toValue: 0.02,
+              duration: 100,
+              useNativeDriver: true,
+            }),
+            Animated.timing(moodTintOpacity, {
+              toValue: 0.04,
+              duration: 100,
+              useNativeDriver: true,
+            }),
+          ]),
+        ]).start();
+
+        Animated.timing(labelOpacity, {
+          toValue: 1,
+          duration: 120,
+          useNativeDriver: true,
+        }).start();
+      });
+    },
+    [dotWidths, labelOpacity, moodTintOpacity],
+  );
+
+  const goToPrevious = useCallback(() => {
+    const nextIndex =
+      (selectedIndexRef.current - 1 + NOTE_TYPES.length) % NOTE_TYPES.length;
+    goToIndex(nextIndex);
+  }, [goToIndex]);
+
+  const goToNext = useCallback(() => {
+    const nextIndex = (selectedIndexRef.current + 1) % NOTE_TYPES.length;
+    goToIndex(nextIndex);
+  }, [goToIndex]);
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_, gestureState) =>
+          Math.abs(gestureState.dx) > 10,
+        onPanResponderRelease: (_, gestureState) => {
+          if (gestureState.dx < -30) {
+            goToNext();
+          } else if (gestureState.dx > 30) {
+            goToPrevious();
+          }
+        },
+      }),
+    [goToNext, goToPrevious],
+  );
 
   function showSuccessFlash(typeColor: string) {
     setSuccessTypeColor(typeColor);
@@ -74,7 +172,7 @@ export default function ComposeScreen() {
       setSuccessVisible(false);
       setTitle('');
       setBody('');
-      setSelectedType('information');
+      setSelectedIndex(DEFAULT_TYPE_INDEX);
       navigation.navigate('Feed');
     });
   }
@@ -92,11 +190,11 @@ export default function ComposeScreen() {
     try {
       const authorId = await getOrCreateUserId();
       const trimmedBody = body.trim();
-      const typeColor = getNoteTypeColor(selectedType);
+      const typeColor = selectedType.color;
 
       const note: Note = {
         noteId: Crypto.randomUUID(),
-        type: selectedType,
+        type: selectedType.type,
         title: title.trim(),
         body: trimmedBody,
         preview: trimmedBody.slice(0, 100),
@@ -120,12 +218,13 @@ export default function ComposeScreen() {
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <View style={styles.flex}>
-          <View
+          <Animated.View
             pointerEvents="none"
             style={[
               styles.moodTint,
               {
-                backgroundColor: selectedTypeColor,
+                backgroundColor: currentTypeColor,
+                opacity: moodTintOpacity,
               },
             ]}
           />
@@ -134,46 +233,66 @@ export default function ComposeScreen() {
             <Text style={styles.headerTitle}>// COMPOSE</Text>
           </View>
 
-          <View style={styles.typeRow}>
-            {NOTE_TYPES.map(type => {
-              const selected = selectedType === type;
-              const typeColor = getNoteTypeColor(type);
+          <View
+            style={styles.typeCarousel}
+            {...panResponder.panHandlers}>
+            <Pressable
+              onPress={goToPrevious}
+              hitSlop={20}
+              style={styles.arrowButton}>
+              <Text
+                style={[
+                  styles.arrow,
+                  { color: `${currentTypeColor}B3` },
+                ]}>
+                ‹
+              </Text>
+            </Pressable>
 
-              return (
-                <Pressable
-                  key={type}
-                  onPress={() => setSelectedType(type)}
-                  style={[
-                    styles.typeCard,
-                    selected
-                      ? {
-                          backgroundColor: `${typeColor}1F`,
-                          borderColor: typeColor,
-                        }
-                      : styles.typeCardDefault,
-                  ]}>
-                  <View
+            <View style={styles.typeCenter}>
+              <Animated.Text
+                style={[
+                  styles.typeName,
+                  {
+                    color: currentTypeColor,
+                    opacity: labelOpacity,
+                  },
+                ]}>
+                {selectedType.label}
+              </Animated.Text>
+
+              <View style={styles.dotsRow}>
+                {NOTE_TYPES.map((typeOption, index) => (
+                  <Animated.View
+                    key={typeOption.type}
                     style={[
-                      styles.typeDot,
+                      styles.dot,
                       {
-                        backgroundColor: selected
-                          ? typeColor
-                          : `${typeColor}99`,
+                        width: dotWidths[index],
+                        backgroundColor:
+                          index === selectedIndex
+                            ? currentTypeColor
+                            : colors.border,
+                        borderRadius: index === selectedIndex ? 3 : 2.5,
                       },
                     ]}
                   />
-                  <Text
-                    style={[
-                      styles.typeLabel,
-                      selected
-                        ? { color: typeColor }
-                        : styles.typeLabelDefault,
-                    ]}>
-                    {type.toUpperCase()}
-                  </Text>
-                </Pressable>
-              );
-            })}
+                ))}
+              </View>
+            </View>
+
+            <Pressable
+              onPress={goToNext}
+              hitSlop={20}
+              style={styles.arrowButton}>
+              <Text
+                style={[
+                  styles.arrow,
+                  { color: `${currentTypeColor}B3` },
+                ]}>
+                ›
+              </Text>
+            </Pressable>
           </View>
 
           <View style={styles.inputArea}>
@@ -188,7 +307,7 @@ export default function ComposeScreen() {
             <View
               style={[
                 styles.titleBorder,
-                { backgroundColor: selectedTypeColor },
+                { backgroundColor: currentTypeColor },
               ]}
             />
             <Text style={styles.titleCount}>
@@ -230,8 +349,8 @@ export default function ComposeScreen() {
                 styles.broadcastButton,
                 canBroadcast
                   ? {
-                      backgroundColor: `${selectedTypeColor}26`,
-                      borderColor: selectedTypeColor,
+                      backgroundColor: `${currentTypeColor}26`,
+                      borderColor: currentTypeColor,
                     }
                   : styles.broadcastButtonInactive,
               ]}>
@@ -239,7 +358,7 @@ export default function ComposeScreen() {
                 style={[
                   styles.broadcastLabel,
                   canBroadcast
-                    ? { color: selectedTypeColor }
+                    ? { color: currentTypeColor }
                     : styles.broadcastLabelInactive,
                 ]}>
                 BROADCAST
@@ -258,8 +377,7 @@ export default function ComposeScreen() {
               },
             ]}
             pointerEvents="none">
-            <Text
-              style={[styles.successText, { color: successTypeColor }]}>
+            <Text style={[styles.successText, { color: successTypeColor }]}>
               // TRANSMITTED
             </Text>
           </Animated.View>
@@ -280,7 +398,7 @@ const styles = StyleSheet.create({
   },
   moodTint: {
     ...StyleSheet.absoluteFill,
-    opacity: 0.03,
+    zIndex: -1,
   },
   header: {
     paddingHorizontal: 20,
@@ -293,37 +411,41 @@ const styles = StyleSheet.create({
     color: colors.accent,
     letterSpacing: 2,
   },
-  typeRow: {
-    flexDirection: 'row',
+  typeCarousel: {
+    height: 100,
+    width: '100%',
     paddingHorizontal: 16,
-    paddingBottom: 16,
-    gap: 8,
+    marginBottom: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
-  typeCard: {
+  arrowButton: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  arrow: {
+    fontSize: 32,
+    fontFamily: fonts.regular,
+  },
+  typeCenter: {
     flex: 1,
-    paddingVertical: 14,
-    borderRadius: 6,
-    borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  typeCardDefault: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-  },
-  typeDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  typeLabel: {
+  typeName: {
+    fontSize: 26,
     fontFamily: fonts.bold,
-    fontSize: 9,
     letterSpacing: 3,
-    marginTop: 6,
+    textAlign: 'center',
   },
-  typeLabelDefault: {
-    color: colors.textMeta,
+  dotsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 10,
+  },
+  dot: {
+    height: 5,
   },
   inputArea: {
     flex: 1,
@@ -338,7 +460,7 @@ const styles = StyleSheet.create({
   },
   titleBorder: {
     height: 1,
-    opacity: 0.6,
+    opacity: 0.5,
     marginBottom: 4,
   },
   titleCount: {
