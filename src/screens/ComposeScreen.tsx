@@ -11,16 +11,15 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  TouchableWithoutFeedback,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { getOrCreateUserId } from '../identity/getOrCreateUserId';
 import { useMesh } from '../mesh/MeshContext';
 import type { RootTabParamList } from '../navigation/AppNavigator';
 import { colors, getNoteTypeColor } from '../theme/colors';
-import { fonts, typography } from '../theme/typography';
+import { fonts } from '../theme/typography';
 import type { Note, NoteType } from '../types/Note';
 
 const NOTE_TYPES: NoteType[] = [
@@ -45,25 +44,38 @@ export default function ComposeScreen() {
   const [successVisible, setSuccessVisible] = useState(false);
   const [errorVisible, setErrorVisible] = useState(false);
   const [successTypeColor, setSuccessTypeColor] = useState(colors.typeInformation);
-  const successOpacity = useRef(new Animated.Value(0)).current;
+  const successOverlayOpacity = useRef(new Animated.Value(0)).current;
 
   const canBroadcast =
     title.trim().length > 0 && body.trim().length > 0 && !isBroadcasting;
   const selectedTypeColor = getNoteTypeColor(selectedType);
 
-  function showSuccessFlash() {
+  function showSuccessFlash(typeColor: string) {
+    setSuccessTypeColor(typeColor);
     setSuccessVisible(true);
-    successOpacity.setValue(1);
+    successOverlayOpacity.setValue(0);
 
-    Animated.timing(successOpacity, {
-      toValue: 0,
-      duration: 1500,
-      useNativeDriver: true,
-    }).start(({ finished }) => {
-      if (finished) {
-        setSuccessVisible(false);
-        navigation.navigate('Feed');
+    Animated.sequence([
+      Animated.timing(successOverlayOpacity, {
+        toValue: 0.95,
+        duration: 400,
+        useNativeDriver: true,
+      }),
+      Animated.timing(successOverlayOpacity, {
+        toValue: 0,
+        duration: 800,
+        useNativeDriver: true,
+      }),
+    ]).start(({ finished }) => {
+      if (!finished) {
+        return;
       }
+
+      setSuccessVisible(false);
+      setTitle('');
+      setBody('');
+      setSelectedType('information');
+      navigation.navigate('Feed');
     });
   }
 
@@ -72,6 +84,7 @@ export default function ComposeScreen() {
       return;
     }
 
+    Keyboard.dismiss();
     setIsBroadcasting(true);
     setErrorVisible(false);
     setSuccessVisible(false);
@@ -79,6 +92,7 @@ export default function ComposeScreen() {
     try {
       const authorId = await getOrCreateUserId();
       const trimmedBody = body.trim();
+      const typeColor = getNoteTypeColor(selectedType);
 
       const note: Note = {
         noteId: Crypto.randomUUID(),
@@ -92,13 +106,7 @@ export default function ComposeScreen() {
       };
 
       await broadcastNote(note);
-
-      Keyboard.dismiss();
-      setSuccessTypeColor(getNoteTypeColor(selectedType));
-      setTitle('');
-      setBody('');
-      setSelectedType('information');
-      showSuccessFlash();
+      showSuccessFlash(typeColor);
     } catch {
       setErrorVisible(true);
     } finally {
@@ -107,48 +115,23 @@ export default function ComposeScreen() {
   }
 
   return (
-    <KeyboardAvoidingView
-      style={styles.flex}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-      <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
-        <View
-          style={[
-            styles.container,
-            {
-              paddingTop: insets.top + 16,
-              paddingBottom: insets.bottom + 16,
-            },
-          ]}>
-          <View style={styles.headerRow}>
-            <Pressable
-              onPress={Keyboard.dismiss}
-              style={styles.dismissButton}
-              hitSlop={4}>
-              <Text style={styles.dismissLabel}>✕</Text>
-            </Pressable>
+    <SafeAreaView style={styles.safeArea}>
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <View style={styles.flex}>
+          <View
+            pointerEvents="none"
+            style={[
+              styles.moodTint,
+              {
+                backgroundColor: selectedTypeColor,
+              },
+            ]}
+          />
+
+          <View style={styles.header}>
             <Text style={styles.headerTitle}>// COMPOSE</Text>
-            <Pressable
-              onPress={handleBroadcast}
-              disabled={!canBroadcast}
-              style={[
-                styles.broadcastButton,
-                canBroadcast
-                  ? {
-                      backgroundColor: selectedTypeColor,
-                      borderColor: selectedTypeColor,
-                    }
-                  : styles.broadcastButtonInactive,
-              ]}>
-              <Text
-                style={[
-                  styles.broadcastLabel,
-                  canBroadcast
-                    ? styles.broadcastLabelActive
-                    : styles.broadcastLabelInactive,
-                ]}>
-                BROADCAST
-              </Text>
-            </Pressable>
           </View>
 
           <View style={styles.typeRow}>
@@ -161,23 +144,30 @@ export default function ComposeScreen() {
                   key={type}
                   onPress={() => setSelectedType(type)}
                   style={[
-                    styles.typePill,
+                    styles.typeCard,
                     selected
                       ? {
-                          backgroundColor: `${typeColor}33`,
+                          backgroundColor: `${typeColor}1F`,
                           borderColor: typeColor,
                         }
-                      : styles.typePillDefault,
+                      : styles.typeCardDefault,
                   ]}>
+                  <View
+                    style={[
+                      styles.typeDot,
+                      {
+                        backgroundColor: selected
+                          ? typeColor
+                          : `${typeColor}99`,
+                      },
+                    ]}
+                  />
                   <Text
                     style={[
-                      styles.typePillLabel,
+                      styles.typeLabel,
                       selected
-                        ? {
-                            color: typeColor,
-                            fontFamily: fonts.bold,
-                          }
-                        : styles.typePillLabelDefault,
+                        ? { color: typeColor }
+                        : styles.typeLabelDefault,
                     ]}>
                     {type.toUpperCase()}
                   </Text>
@@ -186,7 +176,7 @@ export default function ComposeScreen() {
             })}
           </View>
 
-          <View style={styles.titleBlock}>
+          <View style={styles.inputArea}>
             <TextInput
               value={title}
               onChangeText={value => setTitle(value.slice(0, TITLE_MAX))}
@@ -195,175 +185,227 @@ export default function ComposeScreen() {
               style={styles.titleInput}
               maxLength={TITLE_MAX}
             />
-            <Text style={styles.titleCount}>
-              {String(title.length).padStart(2, '0')}/{TITLE_MAX}
-            </Text>
-          </View>
-
-          <View style={styles.bodyBlock}>
-            <TextInput
-              value={body}
-              onChangeText={value => setBody(value.slice(0, BODY_MAX))}
-              placeholder="COMPOSE YOUR NOTE..."
-              placeholderTextColor={colors.textMeta}
-              style={styles.bodyInput}
-              multiline
-              textAlignVertical="top"
-              maxLength={BODY_MAX}
+            <View
+              style={[
+                styles.titleBorder,
+                { backgroundColor: selectedTypeColor },
+              ]}
             />
-            <Text style={styles.bodyCount}>
-              {String(body.length).padStart(4, '0')}/{BODY_MAX}
+            <Text style={styles.titleCount}>
+              {title.length}/{TITLE_MAX}
             </Text>
+
+            <View style={styles.sectionDivider} />
+
+            <View style={styles.bodyContainer}>
+              <TextInput
+                value={body}
+                onChangeText={value => setBody(value.slice(0, BODY_MAX))}
+                placeholder="COMPOSE YOUR TRANSMISSION..."
+                placeholderTextColor={colors.textMeta}
+                style={styles.bodyInput}
+                multiline
+                textAlignVertical="top"
+                maxLength={BODY_MAX}
+              />
+              <Text style={styles.bodyCount}>
+                {body.length}/{BODY_MAX}
+              </Text>
+            </View>
+
+            {errorVisible && (
+              <Text style={styles.errorMessage}>BROADCAST FAILED</Text>
+            )}
           </View>
 
-          {errorVisible && (
-            <Text style={styles.errorMessage}>BROADCAST FAILED</Text>
-          )}
-        </View>
-      </TouchableWithoutFeedback>
-
-      {successVisible && (
-        <Animated.View
-          style={[styles.successOverlay, { opacity: successOpacity }]}
-          pointerEvents="none">
-          <Text
+          <View
             style={[
-              styles.successText,
-              { color: successTypeColor },
+              styles.broadcastZone,
+              { paddingBottom: insets.bottom + 16 },
             ]}>
-            // TRANSMITTED
-          </Text>
-        </Animated.View>
-      )}
-    </KeyboardAvoidingView>
+            <Pressable
+              onPress={handleBroadcast}
+              disabled={!canBroadcast}
+              style={[
+                styles.broadcastButton,
+                canBroadcast
+                  ? {
+                      backgroundColor: `${selectedTypeColor}26`,
+                      borderColor: selectedTypeColor,
+                    }
+                  : styles.broadcastButtonInactive,
+              ]}>
+              <Text
+                style={[
+                  styles.broadcastLabel,
+                  canBroadcast
+                    ? { color: selectedTypeColor }
+                    : styles.broadcastLabelInactive,
+                ]}>
+                BROADCAST
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+
+        {successVisible && (
+          <Animated.View
+            style={[
+              styles.successOverlay,
+              {
+                backgroundColor: colors.background,
+                opacity: successOverlayOpacity,
+              },
+            ]}
+            pointerEvents="none">
+            <Text
+              style={[styles.successText, { color: successTypeColor }]}>
+              // TRANSMITTED
+            </Text>
+          </Animated.View>
+        )}
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
   flex: {
     flex: 1,
     backgroundColor: colors.background,
   },
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-    paddingHorizontal: 16,
+  moodTint: {
+    ...StyleSheet.absoluteFill,
+    opacity: 0.03,
   },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
-    gap: 8,
-  },
-  dismissButton: {
-    padding: 8,
-  },
-  dismissLabel: {
-    color: colors.textMeta,
-    fontSize: 11,
-    letterSpacing: 2,
-    fontFamily: fonts.regular,
+  header: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 12,
   },
   headerTitle: {
-    ...typography.lg,
-    flex: 1,
     fontFamily: fonts.bold,
+    fontSize: 18,
     color: colors.accent,
+    letterSpacing: 2,
+  },
+  typeRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    gap: 8,
+  },
+  typeCard: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  typeCardDefault: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+  },
+  typeDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  typeLabel: {
+    fontFamily: fonts.bold,
+    fontSize: 9,
+    letterSpacing: 3,
+    marginTop: 6,
+  },
+  typeLabelDefault: {
+    color: colors.textMeta,
+  },
+  inputArea: {
+    flex: 1,
+    paddingHorizontal: 16,
+  },
+  titleInput: {
+    fontFamily: fonts.regular,
+    fontSize: 16,
+    color: colors.textPrimary,
+    paddingVertical: 14,
+    paddingHorizontal: 0,
+  },
+  titleBorder: {
+    height: 1,
+    opacity: 0.6,
+    marginBottom: 4,
+  },
+  titleCount: {
+    alignSelf: 'flex-end',
+    fontFamily: fonts.regular,
+    fontSize: 10,
+    color: colors.textMeta,
+    marginBottom: 16,
+  },
+  sectionDivider: {
+    height: 1,
+    backgroundColor: colors.border,
+    marginBottom: 16,
+  },
+  bodyContainer: {
+    flex: 1,
+  },
+  bodyInput: {
+    flex: 1,
+    fontFamily: fonts.regular,
+    fontSize: 15,
+    lineHeight: 24,
+    color: colors.textPrimary,
+    textAlignVertical: 'top',
+    paddingTop: 0,
+    paddingHorizontal: 0,
+  },
+  bodyCount: {
+    position: 'absolute',
+    right: 0,
+    bottom: 0,
+    fontFamily: fonts.regular,
+    fontSize: 10,
+    color: colors.textMeta,
+  },
+  broadcastZone: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
   },
   broadcastButton: {
-    borderWidth: 1,
-    borderRadius: 4,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    height: 52,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   broadcastButtonInactive: {
     backgroundColor: 'transparent',
     borderColor: colors.border,
   },
   broadcastLabel: {
-    fontSize: 11,
-    letterSpacing: 3,
     fontFamily: fonts.bold,
-  },
-  broadcastLabelActive: {
-    color: colors.background,
+    fontSize: 13,
+    letterSpacing: 4,
   },
   broadcastLabelInactive: {
     color: colors.textMeta,
-    fontFamily: fonts.bold,
-  },
-  typeRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 24,
-  },
-  typePill: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 4,
-    borderWidth: 1,
-  },
-  typePillDefault: {
-    backgroundColor: colors.surfaceAlt,
-    borderColor: colors.border,
-  },
-  typePillLabel: {
-    fontSize: 10,
-    letterSpacing: 3,
-    fontFamily: fonts.regular,
-  },
-  typePillLabelDefault: {
-    color: colors.textMeta,
-    fontFamily: fonts.regular,
-  },
-  titleBlock: {
-    marginBottom: 16,
-  },
-  titleInput: {
-    ...typography.base,
-    fontFamily: fonts.regular,
-    color: colors.textPrimary,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    paddingVertical: 8,
-    paddingRight: 32,
-  },
-  titleCount: {
-    fontSize: 10,
-    fontFamily: fonts.regular,
-    color: colors.textMeta,
-    alignSelf: 'flex-end',
-    marginTop: 4,
-  },
-  bodyBlock: {
-    flex: 1,
-  },
-  bodyInput: {
-    flex: 1,
-    fontSize: 13,
-    fontFamily: fonts.regular,
-    color: colors.textPrimary,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: 8,
-  },
-  bodyCount: {
-    fontSize: 10,
-    fontFamily: fonts.regular,
-    color: colors.textMeta,
-    alignSelf: 'flex-end',
-    marginTop: 4,
   },
   successOverlay: {
     ...StyleSheet.absoluteFill,
-    justifyContent: 'center',
     alignItems: 'center',
+    justifyContent: 'center',
   },
   successText: {
-    fontSize: 16,
-    letterSpacing: 3,
     fontFamily: fonts.bold,
+    fontSize: 20,
+    letterSpacing: 3,
   },
   errorMessage: {
     fontSize: 11,

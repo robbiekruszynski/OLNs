@@ -87,7 +87,7 @@ const HOW_IT_WORKS_STEPS = [
     title: 'DISCOVER',
     color: colors.typeResource,
     description:
-      'Open the feed to see notes from the mesh around you — from people nearby, or messages that have traveled through many hands to reach you.',
+      'Open the feed to see notes from the mesh around you, from people nearby, or messages that have traveled through many hands to reach you.',
   },
 ] as const;
 
@@ -677,6 +677,7 @@ export default function HomeScreen() {
               key={node.id}
               style={[
                 styles.node,
+                node.isOrigin && styles.originNode,
                 {
                   left: node.x - nodeRadius,
                   top: node.y - nodeRadius,
@@ -858,7 +859,7 @@ const styles = StyleSheet.create({
     height: PULSE_END_RADIUS * 2,
     borderRadius: PULSE_END_RADIUS,
     borderWidth: 1,
-    borderColor: colors.accent,
+    borderColor: colors.hopIndicator,
     backgroundColor: 'transparent',
   },
   birthRing: {
@@ -880,6 +881,9 @@ const styles = StyleSheet.create({
   node: {
     position: 'absolute',
     backgroundColor: colors.accent,
+  },
+  originNode: {
+    backgroundColor: colors.hopIndicator,
   },
   languageButton: {
     position: 'absolute',
@@ -953,19 +957,19 @@ const styles = StyleSheet.create({
   },
   joinButton: {
     borderWidth: 1,
-    borderColor: colors.accent,
+    borderColor: colors.hopIndicator,
     borderRadius: 4,
     paddingVertical: 14,
     paddingHorizontal: 48,
-    backgroundColor: colors.accentDim,
+    backgroundColor: '#256032',
   },
   joinButtonPressed: {
-    backgroundColor: colors.accent,
+    backgroundColor: colors.hopIndicator,
   },
   joinLabel: {
     fontFamily: fonts.bold,
     fontSize: 13,
-    color: colors.accent,
+    color: colors.hopIndicator,
     letterSpacing: 4,
   },
   joinLabelPressed: {
