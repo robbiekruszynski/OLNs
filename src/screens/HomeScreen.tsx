@@ -1,15 +1,17 @@
 import { useNavigation } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
+  Modal,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   useWindowDimensions,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
@@ -20,53 +22,92 @@ const NODE_DIAMETER = 6;
 const NODE_RADIUS = 3;
 const ORIGIN_DIAMETER = 10;
 const ORIGIN_RADIUS = 5;
-const PULSE_START_RADIUS = 4;
-const PULSE_END_RADIUS = 60;
-const CONNECTION_LINE_MIN_OPACITY = 0.08;
-const CONNECTION_LINE_MAX_OPACITY = 0.16;
+const PACKET_DIAMETER = 4;
+const PACKET_RADIUS = 2;
+const PULSE_START_RADIUS = 5;
+const PULSE_END_RADIUS = 80;
+const CONNECTION_MAX_OPACITY = 0.35;
+const MIN_ACTIVE_CONNECTIONS = 3;
+const MAX_ACTIVE_CONNECTIONS = 5;
 
 const NODE_POSITIONS = [
-  { x: 0.15, y: 0.08 },
-  { x: 0.75, y: 0.12 },
-  { x: 0.88, y: 0.28 },
-  { x: 0.08, y: 0.35 },
-  { x: 0.55, y: 0.18 },
-  { x: 0.92, y: 0.52 },
-  { x: 0.05, y: 0.62 },
-  { x: 0.35, y: 0.72 },
-  { x: 0.78, y: 0.68 },
-  { x: 0.22, y: 0.88 },
-  { x: 0.65, y: 0.85 },
-  { x: 0.48, y: 0.42, isOrigin: true },
+  { x: 0.12, y: 0.06 },
+  { x: 0.78, y: 0.09 },
+  { x: 0.92, y: 0.31 },
+  { x: 0.06, y: 0.38 },
+  { x: 0.58, y: 0.15 },
+  { x: 0.88, y: 0.55 },
+  { x: 0.04, y: 0.65 },
+  { x: 0.32, y: 0.75 },
+  { x: 0.82, y: 0.71 },
+  { x: 0.18, y: 0.91 },
+  { x: 0.68, y: 0.88 },
+  { x: 0.46, y: 0.44, isOrigin: true },
 ] as const;
 
-const MESH_EDGES: ReadonlyArray<readonly [number, number]> = [
-  [11, 4],
-  [11, 3],
-  [11, 7],
-  [11, 8],
-  [0, 3],
-  [1, 4],
-  [3, 7],
-  [6, 7],
-  [8, 10],
-];
+const LANGUAGES = [
+  { code: 'EN', label: 'English' },
+  { code: 'ES', label: 'Español' },
+  { code: 'FR', label: 'Français' },
+  { code: 'PT', label: 'Português' },
+  { code: 'DE', label: 'Deutsch' },
+  { code: 'AR', label: 'العربية' },
+  { code: 'ZH', label: '中文' },
+  { code: 'JA', label: '日本語' },
+] as const;
+
+const HOW_IT_WORKS_STEPS = [
+  {
+    number: '01',
+    title: 'BROADCAST',
+    description:
+      'Write a note and broadcast it onto the mesh. No internet needed — your message travels over Bluetooth.',
+  },
+  {
+    number: '02',
+    title: 'PROPAGATE',
+    description:
+      'Nearby devices automatically pick up and relay your note, carrying it further across the mesh with each hop.',
+  },
+  {
+    number: '03',
+    title: 'PERSIST',
+    description:
+      'Notes live on the network independently. Even after you leave, your message continues traveling through devices in the area.',
+  },
+  {
+    number: '04',
+    title: 'DISCOVER',
+    description:
+      'Open the feed to see notes from the mesh around you — from people nearby, or messages that have traveled through many hands to reach you.',
+  },
+] as const;
 
 interface NodeData {
   id: number;
   x: number;
   y: number;
-  baseOpacity: number;
   pulseDuration: number;
   isOrigin: boolean;
 }
 
-interface ConnectionData {
-  x1: number;
-  y1: number;
-  x2: number;
-  y2: number;
-  opacity: number;
+interface ActiveConnection {
+  id: string;
+  from: number;
+  to: number;
+  opacity: Animated.Value;
+}
+
+interface DataPacket {
+  id: string;
+  from: number;
+  to: number;
+  progress: Animated.Value;
+  opacity: Animated.Value;
+}
+
+function getPairKey(a: number, b: number): string {
+  return a < b ? `${a}-${b}` : `${b}-${a}`;
 }
 
 function createNodes(width: number, height: number): NodeData[] {
@@ -74,64 +115,69 @@ function createNodes(width: number, height: number): NodeData[] {
     id,
     x: position.x * width,
     y: position.y * height,
-    baseOpacity: 'isOrigin' in position ? 1 : 0.4 + (id % 6) * 0.1,
-    pulseDuration: 2000 + (id * 173) % 2000,
+    pulseDuration: 1500 + ((id * 127) % 1500),
     isOrigin: 'isOrigin' in position && position.isOrigin === true,
   }));
 }
 
-function createConnections(nodes: NodeData[]): ConnectionData[] {
-  const maxDistance = Math.max(
-    ...MESH_EDGES.map(([from, to]) =>
-      Math.hypot(nodes[from].x - nodes[to].x, nodes[from].y - nodes[to].y),
-    ),
-    1,
-  );
-
-  return MESH_EDGES.map(([from, to]) => {
-    const distance = Math.hypot(
-      nodes[from].x - nodes[to].x,
-      nodes[from].y - nodes[to].y,
-    );
-    const proximity = 1 - distance / maxDistance;
-
-    const isHubEdge = nodes[from].isOrigin || nodes[to].isOrigin;
-    const baseOpacity =
-      CONNECTION_LINE_MIN_OPACITY +
-      proximity * (CONNECTION_LINE_MAX_OPACITY - CONNECTION_LINE_MIN_OPACITY);
-
-    return {
-      x1: nodes[from].x,
-      y1: nodes[from].y,
-      x2: nodes[to].x,
-      y2: nodes[to].y,
-      opacity: isHubEdge ? Math.min(baseOpacity + 0.03, 0.19) : baseOpacity,
-    };
-  });
-}
-
-function MeshConnection({ connection }: { connection: ConnectionData }) {
-  const length = Math.hypot(
-    connection.x2 - connection.x1,
-    connection.y2 - connection.y1,
-  );
-  const angle = Math.atan2(
-    connection.y2 - connection.y1,
-    connection.x2 - connection.x1,
-  );
-  const midX = (connection.x1 + connection.x2) / 2;
-  const midY = (connection.y1 + connection.y2) / 2;
+function DynamicConnectionLine({
+  from,
+  to,
+  nodes,
+  opacity,
+}: {
+  from: number;
+  to: number;
+  nodes: NodeData[];
+  opacity: Animated.Value;
+}) {
+  const start = nodes[from];
+  const end = nodes[to];
+  const length = Math.hypot(end.x - start.x, end.y - start.y);
+  const angle = Math.atan2(end.y - start.y, end.x - start.x);
+  const midX = (start.x + end.x) / 2;
+  const midY = (start.y + end.y) / 2;
 
   return (
-    <View
+    <Animated.View
       style={[
         styles.connectionLine,
         {
           left: midX - length / 2,
-          top: midY - 0.75,
+          top: midY - 0.25,
           width: length,
-          opacity: connection.opacity,
+          opacity,
           transform: [{ rotate: `${angle}rad` }],
+        },
+      ]}
+    />
+  );
+}
+
+function DataPacketDot({
+  packet,
+  nodes,
+}: {
+  packet: DataPacket;
+  nodes: NodeData[];
+}) {
+  const from = nodes[packet.from];
+  const to = nodes[packet.to];
+  const deltaX = to.x - from.x;
+  const deltaY = to.y - from.y;
+
+  return (
+    <Animated.View
+      style={[
+        styles.packet,
+        {
+          left: from.x - PACKET_RADIUS,
+          top: from.y - PACKET_RADIUS,
+          opacity: packet.opacity,
+          transform: [
+            { translateX: Animated.multiply(packet.progress, deltaX) },
+            { translateY: Animated.multiply(packet.progress, deltaY) },
+          ],
         },
       ]}
     />
@@ -142,55 +188,153 @@ export default function HomeScreen() {
   const navigation = useNavigation<StackNavigationProp<RootStackParamList>>();
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
+
   const [isJoining, setIsJoining] = useState(false);
+  const [selectedLanguage, setSelectedLanguage] = useState('EN');
+  const [showHowItWorks, setShowHowItWorks] = useState(false);
+  const [showLanguage, setShowLanguage] = useState(false);
+  const [activeConnections, setActiveConnections] = useState<ActiveConnection[]>(
+    [],
+  );
+  const [dataPackets, setDataPackets] = useState<DataPacket[]>([]);
 
   const nodes = useMemo(() => createNodes(width, height), [width, height]);
-  const connections = useMemo(() => createConnections(nodes), [nodes]);
-
   const originNode = nodes.find(node => node.isOrigin) ?? nodes[0];
 
-  const fadeAnims = useRef(
-    Array.from({ length: NODE_COUNT }, () => new Animated.Value(0)),
-  ).current;
   const pulseAnims = useRef(
     Array.from({ length: NODE_COUNT }, () => new Animated.Value(0.65)),
   ).current;
-  const baseOpacityAnims = useRef(
-    Array.from({ length: NODE_COUNT }, () => new Animated.Value(1)),
-  ).current;
-  const linesOpacity = useRef(new Animated.Value(0)).current;
   const pulseProgress = useRef(new Animated.Value(0)).current;
   const pulseRingOpacity = useRef(new Animated.Value(0)).current;
   const buttonOpacity = useRef(new Animated.Value(1)).current;
 
+  const connectionsRef = useRef<Map<string, ActiveConnection>>(new Map());
   const pulseLoops = useRef<Animated.CompositeAnimation[]>([]);
+  const connectionIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
+    null,
+  );
   const pulseIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const packetIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const joinTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isMountedRef = useRef(true);
 
-  useEffect(() => {
-    nodes.forEach((node, index) => {
-      baseOpacityAnims[index].setValue(node.baseOpacity);
+  const startConnection = useCallback((from: number, to: number) => {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const opacity = new Animated.Value(0);
+    const connection: ActiveConnection = { id, from, to, opacity };
+
+    connectionsRef.current.set(id, connection);
+    setActiveConnections(Array.from(connectionsRef.current.values()));
+
+    const holdDuration = 800 + Math.random() * 700;
+
+    Animated.sequence([
+      Animated.timing(opacity, {
+        toValue: CONNECTION_MAX_OPACITY,
+        duration: 600,
+        useNativeDriver: true,
+      }),
+      Animated.delay(holdDuration),
+      Animated.timing(opacity, {
+        toValue: 0,
+        duration: 600,
+        useNativeDriver: true,
+      }),
+    ]).start(({ finished }) => {
+      if (!finished || !isMountedRef.current) {
+        return;
+      }
+
+      connectionsRef.current.delete(id);
+      setActiveConnections(Array.from(connectionsRef.current.values()));
     });
+  }, []);
 
-    const fadeAnimation = Animated.parallel(
-      fadeAnims.map((anim, index) =>
-        Animated.timing(anim, {
-          toValue: 1,
-          duration: 500,
-          delay: index * 100,
-          useNativeDriver: true,
-        }),
+  const spawnConnections = useCallback(() => {
+    const activeCount = connectionsRef.current.size;
+    if (activeCount >= MAX_ACTIVE_CONNECTIONS) {
+      return;
+    }
+
+    const activePairs = new Set(
+      Array.from(connectionsRef.current.values()).map(connection =>
+        getPairKey(connection.from, connection.to),
       ),
     );
 
-    fadeAnimation.start();
+    const targetCount =
+      activeCount < MIN_ACTIVE_CONNECTIONS
+        ? MIN_ACTIVE_CONNECTIONS
+        : activeCount + 1;
+    const toAdd = Math.min(
+      targetCount - activeCount,
+      MAX_ACTIVE_CONNECTIONS - activeCount,
+    );
 
-    const linesTimer = setTimeout(() => {
-      Animated.timing(linesOpacity, {
+    for (let index = 0; index < toAdd; index += 1) {
+      const candidates: [number, number][] = [];
+
+      for (let i = 0; i < NODE_COUNT; i += 1) {
+        for (let j = i + 1; j < NODE_COUNT; j += 1) {
+          if (!activePairs.has(getPairKey(i, j))) {
+            candidates.push([i, j]);
+          }
+        }
+      }
+
+      if (candidates.length === 0) {
+        break;
+      }
+
+      const pair = candidates[Math.floor(Math.random() * candidates.length)];
+      activePairs.add(getPairKey(pair[0], pair[1]));
+      startConnection(pair[0], pair[1]);
+    }
+  }, [startConnection]);
+
+  const spawnDataPacket = useCallback(() => {
+    const connections = Array.from(connectionsRef.current.values());
+    if (connections.length === 0) {
+      return;
+    }
+
+    const connection =
+      connections[Math.floor(Math.random() * connections.length)];
+    const progress = new Animated.Value(0);
+    const opacity = new Animated.Value(0.8);
+    const id = `packet-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const packet: DataPacket = {
+      id,
+      from: connection.from,
+      to: connection.to,
+      progress,
+      opacity,
+    };
+
+    setDataPackets(current => [...current, packet]);
+
+    Animated.parallel([
+      Animated.timing(progress, {
         toValue: 1,
-        duration: 1500,
+        duration: 800,
         useNativeDriver: true,
-      }).start();
-    }, 800);
+      }),
+      Animated.timing(opacity, {
+        toValue: 0,
+        duration: 800,
+        useNativeDriver: true,
+      }),
+    ]).start(({ finished }) => {
+      if (!finished || !isMountedRef.current) {
+        return;
+      }
+
+      setDataPackets(current => current.filter(item => item.id !== id));
+    });
+  }, []);
+
+  useEffect(() => {
+    isMountedRef.current = true;
 
     pulseLoops.current = pulseAnims
       .map((anim, index) => {
@@ -221,48 +365,49 @@ export default function HomeScreen() {
 
     function runOriginPulse() {
       pulseProgress.setValue(0);
-      pulseRingOpacity.setValue(0.6);
+      pulseRingOpacity.setValue(0.5);
 
       Animated.parallel([
         Animated.timing(pulseProgress, {
           toValue: 1,
-          duration: 1500,
+          duration: 2000,
           useNativeDriver: true,
         }),
         Animated.timing(pulseRingOpacity, {
           toValue: 0,
-          duration: 1500,
+          duration: 2000,
           useNativeDriver: true,
         }),
       ]).start();
     }
 
-    const pulseStartTimer = setTimeout(() => {
-      runOriginPulse();
-      pulseIntervalRef.current = setInterval(runOriginPulse, 3000);
-    }, 1500);
+    runOriginPulse();
+    pulseIntervalRef.current = setInterval(runOriginPulse, 4000);
+
+    spawnConnections();
+    connectionIntervalRef.current = setInterval(spawnConnections, 1200);
+    packetIntervalRef.current = setInterval(spawnDataPacket, 3000);
 
     return () => {
-      fadeAnimation.stop();
-      clearTimeout(linesTimer);
-      clearTimeout(pulseStartTimer);
+      isMountedRef.current = false;
+      pulseLoops.current.forEach(loop => loop.stop());
+      if (connectionIntervalRef.current) {
+        clearInterval(connectionIntervalRef.current);
+      }
       if (pulseIntervalRef.current) {
         clearInterval(pulseIntervalRef.current);
       }
-      pulseLoops.current.forEach(loop => loop.stop());
-      linesOpacity.stopAnimation();
+      if (packetIntervalRef.current) {
+        clearInterval(packetIntervalRef.current);
+      }
+      if (joinTimeoutRef.current) {
+        clearTimeout(joinTimeoutRef.current);
+      }
       pulseProgress.stopAnimation();
       pulseRingOpacity.stopAnimation();
+      connectionsRef.current.clear();
     };
-  }, [
-    fadeAnims,
-    linesOpacity,
-    nodes,
-    pulseAnims,
-    pulseProgress,
-    pulseRingOpacity,
-    baseOpacityAnims,
-  ]);
+  }, [nodes, pulseAnims, pulseProgress, pulseRingOpacity, spawnConnections, spawnDataPacket]);
 
   const pulseScale = pulseProgress.interpolate({
     inputRange: [0, 1],
@@ -292,7 +437,7 @@ export default function HomeScreen() {
       ),
     ).start();
 
-    setTimeout(() => {
+    joinTimeoutRef.current = setTimeout(() => {
       navigation.replace('Main');
     }, 400);
   }
@@ -300,11 +445,15 @@ export default function HomeScreen() {
   return (
     <View style={styles.container}>
       <View style={[styles.meshCanvas, { width, height }]}>
-        <Animated.View style={[styles.connectionsLayer, { opacity: linesOpacity }]}>
-          {connections.map((connection, index) => (
-            <MeshConnection key={`line-${index}`} connection={connection} />
-          ))}
-        </Animated.View>
+        {activeConnections.map(connection => (
+          <DynamicConnectionLine
+            key={connection.id}
+            from={connection.from}
+            to={connection.to}
+            nodes={nodes}
+            opacity={connection.opacity}
+          />
+        ))}
 
         <Animated.View
           style={[
@@ -318,15 +467,14 @@ export default function HomeScreen() {
           ]}
         />
 
+        {dataPackets.map(packet => (
+          <DataPacketDot key={packet.id} packet={packet} nodes={nodes} />
+        ))}
+
         {nodes.map((node, index) => {
           const nodeRadius = node.isOrigin ? ORIGIN_RADIUS : NODE_RADIUS;
           const nodeDiameter = node.isOrigin ? ORIGIN_DIAMETER : NODE_DIAMETER;
-          const nodeOpacity = node.isOrigin
-            ? fadeAnims[index]
-            : Animated.multiply(
-                Animated.multiply(fadeAnims[index], pulseAnims[index]),
-                baseOpacityAnims[index],
-              );
+          const nodeOpacity = node.isOrigin ? 1 : pulseAnims[index];
 
           return (
             <Animated.View
@@ -347,10 +495,24 @@ export default function HomeScreen() {
         })}
       </View>
 
+      <Pressable
+        style={[styles.languageButton, { top: insets.top + 16 }]}
+        onPress={() => setShowLanguage(true)}
+        hitSlop={8}>
+        <Text style={styles.languageButtonLabel}>{selectedLanguage}</Text>
+      </Pressable>
+
+      <Pressable
+        style={[styles.helpButton, { top: insets.top + 16 }]}
+        onPress={() => setShowHowItWorks(true)}
+        hitSlop={8}>
+        <Text style={styles.helpButtonLabel}>?</Text>
+      </Pressable>
+
       <View
         style={[
           styles.identityOverlay,
-          { top: height * 0.35, bottom: height * 0.35 },
+          { top: height * 0.45, transform: [{ translateY: -42 }] },
         ]}
         pointerEvents="none">
         <Text style={styles.title}>OLNs</Text>
@@ -360,11 +522,7 @@ export default function HomeScreen() {
         </Text>
       </View>
 
-      <View
-        style={[
-          styles.bottomSection,
-          { bottom: 80 + insets.bottom },
-        ]}>
+      <View style={[styles.bottomSection, { bottom: insets.bottom + 48 }]}>
         <Text style={styles.hint}>BLE · MESH · OFFLINE</Text>
         <Animated.View style={{ opacity: buttonOpacity }}>
           <Pressable
@@ -386,6 +544,84 @@ export default function HomeScreen() {
           </Pressable>
         </Animated.View>
       </View>
+
+      <Modal
+        visible={showHowItWorks}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowHowItWorks(false)}>
+        <SafeAreaView style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalHeaderTitle}>// HOW IT WORKS</Text>
+            <Pressable
+              onPress={() => setShowHowItWorks(false)}
+              hitSlop={8}
+              style={styles.modalCloseButton}>
+              <Text style={styles.modalCloseLabel}>✕</Text>
+            </Pressable>
+          </View>
+
+          <ScrollView
+            contentContainerStyle={styles.modalScrollContent}
+            showsVerticalScrollIndicator={false}>
+            {HOW_IT_WORKS_STEPS.map((step, index) => (
+              <View key={step.number}>
+                {index > 0 && <View style={styles.stepDivider} />}
+                <View style={styles.stepBlock}>
+                  <Text style={styles.stepNumber}>{step.number}</Text>
+                  <Text style={styles.stepTitle}>{step.title}</Text>
+                  <Text style={styles.stepDescription}>{step.description}</Text>
+                </View>
+              </View>
+            ))}
+
+            <Text style={styles.modalFooter}>
+              OLNs works without WiFi, cellular, or any infrastructure. Pure
+              peer-to-peer mesh networking.
+            </Text>
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
+
+      <Modal
+        visible={showLanguage}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowLanguage(false)}>
+        <SafeAreaView style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalHeaderTitle}>// LANGUAGE</Text>
+            <Pressable
+              onPress={() => setShowLanguage(false)}
+              hitSlop={8}
+              style={styles.modalCloseButton}>
+              <Text style={styles.modalCloseLabel}>✕</Text>
+            </Pressable>
+          </View>
+
+          <ScrollView
+            contentContainerStyle={styles.modalScrollContent}
+            showsVerticalScrollIndicator={false}>
+            {LANGUAGES.map(language => {
+              const selected = selectedLanguage === language.code;
+
+              return (
+                <Pressable
+                  key={language.code}
+                  onPress={() => {
+                    setSelectedLanguage(language.code);
+                    setShowLanguage(false);
+                  }}
+                  style={styles.languageRow}>
+                  <Text style={styles.languageCode}>{language.code}</Text>
+                  <Text style={styles.languageName}>{language.label}</Text>
+                  {selected && <Text style={styles.languageCheck}>✓</Text>}
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
     </View>
   );
 }
@@ -400,12 +636,9 @@ const styles = StyleSheet.create({
     left: 0,
     top: 0,
   },
-  connectionsLayer: {
-    ...StyleSheet.absoluteFill,
-  },
   connectionLine: {
     position: 'absolute',
-    height: 1,
+    height: 0.5,
     backgroundColor: colors.accent,
   },
   pulseRing: {
@@ -417,16 +650,50 @@ const styles = StyleSheet.create({
     borderColor: colors.accent,
     backgroundColor: 'transparent',
   },
+  packet: {
+    position: 'absolute',
+    width: PACKET_DIAMETER,
+    height: PACKET_DIAMETER,
+    borderRadius: PACKET_RADIUS,
+    backgroundColor: colors.accent,
+  },
   node: {
     position: 'absolute',
     backgroundColor: colors.accent,
+  },
+  languageButton: {
+    position: 'absolute',
+    left: 20,
+    zIndex: 10,
+    paddingVertical: 4,
+    paddingHorizontal: 4,
+  },
+  languageButtonLabel: {
+    fontFamily: fonts.bold,
+    fontSize: 11,
+    color: colors.textSecondary,
+    letterSpacing: 2,
+  },
+  helpButton: {
+    position: 'absolute',
+    right: 20,
+    zIndex: 10,
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  helpButtonLabel: {
+    fontFamily: fonts.bold,
+    fontSize: 14,
+    color: colors.textSecondary,
   },
   identityOverlay: {
     position: 'absolute',
     left: 0,
     right: 0,
-    justifyContent: 'center',
     alignItems: 'center',
+    zIndex: 5,
   },
   title: {
     fontFamily: fonts.bold,
@@ -455,6 +722,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     alignItems: 'center',
+    zIndex: 10,
   },
   hint: {
     fontFamily: fonts.regular,
@@ -482,5 +750,96 @@ const styles = StyleSheet.create({
   },
   joinLabelPressed: {
     color: colors.background,
+  },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: colors.surface,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 16,
+  },
+  modalHeaderTitle: {
+    fontFamily: fonts.bold,
+    fontSize: 14,
+    color: colors.accent,
+    letterSpacing: 2,
+  },
+  modalCloseButton: {
+    padding: 8,
+  },
+  modalCloseLabel: {
+    fontFamily: fonts.regular,
+    fontSize: 16,
+    color: colors.textSecondary,
+  },
+  modalScrollContent: {
+    paddingHorizontal: 20,
+    paddingBottom: 32,
+  },
+  stepBlock: {
+    paddingVertical: 24,
+  },
+  stepDivider: {
+    height: 1,
+    backgroundColor: colors.border,
+  },
+  stepNumber: {
+    fontFamily: fonts.bold,
+    fontSize: 12,
+    color: colors.accent,
+    letterSpacing: 2,
+    marginBottom: 8,
+  },
+  stepTitle: {
+    fontFamily: fonts.bold,
+    fontSize: 14,
+    color: colors.textPrimary,
+    letterSpacing: 2,
+    marginBottom: 8,
+  },
+  stepDescription: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    lineHeight: 20,
+    color: colors.textSecondary,
+  },
+  modalFooter: {
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    color: colors.textMeta,
+    textAlign: 'center',
+    marginTop: 24,
+    letterSpacing: 1,
+    lineHeight: 18,
+  },
+  languageRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  languageCode: {
+    width: 40,
+    fontFamily: fonts.bold,
+    fontSize: 12,
+    color: colors.accent,
+    letterSpacing: 1,
+  },
+  languageName: {
+    flex: 1,
+    fontFamily: fonts.regular,
+    fontSize: 14,
+    color: colors.textPrimary,
+  },
+  languageCheck: {
+    fontFamily: fonts.bold,
+    fontSize: 14,
+    color: colors.hopIndicator,
   },
 });
