@@ -60,24 +60,28 @@ const HOW_IT_WORKS_STEPS = [
   {
     number: '01',
     title: 'BROADCAST',
+    color: colors.typeEmergency,
     description:
       'Write a note and broadcast it onto the mesh. No internet needed — your message travels over Bluetooth.',
   },
   {
     number: '02',
     title: 'PROPAGATE',
+    color: colors.typeInformation,
     description:
       'Nearby devices automatically pick up and relay your note, carrying it further across the mesh with each hop.',
   },
   {
     number: '03',
     title: 'PERSIST',
+    color: colors.typeWaypoint,
     description:
       'Notes live on the network independently. Even after you leave, your message continues traveling through devices in the area.',
   },
   {
     number: '04',
     title: 'DISCOVER',
+    color: colors.typeResource,
     description:
       'Open the feed to see notes from the mesh around you — from people nearby, or messages that have traveled through many hands to reach you.',
   },
@@ -548,29 +552,44 @@ export default function HomeScreen() {
       <Modal
         visible={showHowItWorks}
         animationType="slide"
-        presentationStyle="pageSheet"
+        presentationStyle="fullScreen"
         onRequestClose={() => setShowHowItWorks(false)}>
-        <SafeAreaView style={styles.modalContainer}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalHeaderTitle}>// HOW IT WORKS</Text>
+        <SafeAreaView style={styles.howItWorksModalContainer}>
+          <View style={styles.howItWorksModalHeader}>
+            <Text style={styles.howItWorksModalHeaderTitle}>
+              // HOW IT WORKS
+            </Text>
             <Pressable
               onPress={() => setShowHowItWorks(false)}
               hitSlop={8}
-              style={styles.modalCloseButton}>
-              <Text style={styles.modalCloseLabel}>✕</Text>
+              style={styles.howItWorksModalCloseButton}>
+              <Text style={styles.howItWorksModalCloseLabel}>✕</Text>
             </Pressable>
           </View>
 
           <ScrollView
-            contentContainerStyle={styles.modalScrollContent}
+            contentContainerStyle={styles.howItWorksScrollContent}
             showsVerticalScrollIndicator={false}>
             {HOW_IT_WORKS_STEPS.map((step, index) => (
               <View key={step.number}>
                 {index > 0 && <View style={styles.stepDivider} />}
-                <View style={styles.stepBlock}>
-                  <Text style={styles.stepNumber}>{step.number}</Text>
-                  <Text style={styles.stepTitle}>{step.title}</Text>
-                  <Text style={styles.stepDescription}>{step.description}</Text>
+                <View style={styles.stepRow}>
+                  <View
+                    style={[
+                      styles.stepAccentBar,
+                      { backgroundColor: step.color },
+                    ]}
+                  />
+                  <View style={styles.stepContent}>
+                    <Text
+                      style={[styles.stepNumber, { color: step.color }]}>
+                      {step.number}
+                    </Text>
+                    <Text style={styles.stepTitle}>{step.title}</Text>
+                    <Text style={styles.stepDescription}>
+                      {step.description}
+                    </Text>
+                  </View>
                 </View>
               </View>
             ))}
@@ -755,6 +774,39 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.surface,
   },
+  howItWorksModalContainer: {
+    flex: 1,
+    backgroundColor: colors.surface,
+  },
+  howItWorksModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 24,
+    paddingTop: 32,
+    paddingBottom: 0,
+    marginBottom: 28,
+    backgroundColor: colors.surface,
+  },
+  howItWorksModalHeaderTitle: {
+    flex: 1,
+    fontFamily: fonts.bold,
+    fontSize: 16,
+    color: colors.accent,
+    letterSpacing: 3,
+  },
+  howItWorksModalCloseButton: {
+    padding: 12,
+  },
+  howItWorksModalCloseLabel: {
+    fontFamily: fonts.regular,
+    fontSize: 20,
+    color: colors.textSecondary,
+  },
+  howItWorksScrollContent: {
+    paddingHorizontal: 24,
+    paddingBottom: 32,
+  },
   modalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -781,41 +833,52 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 32,
   },
-  stepBlock: {
-    paddingVertical: 24,
+  stepRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+  },
+  stepAccentBar: {
+    width: 3,
+    borderRadius: 2,
+    marginRight: 16,
+  },
+  stepContent: {
+    flex: 1,
   },
   stepDivider: {
     height: 1,
     backgroundColor: colors.border,
+    marginVertical: 28,
   },
   stepNumber: {
     fontFamily: fonts.bold,
-    fontSize: 12,
-    color: colors.accent,
-    letterSpacing: 2,
-    marginBottom: 8,
+    fontSize: 11,
+    letterSpacing: 3,
+    marginBottom: 6,
   },
   stepTitle: {
     fontFamily: fonts.bold,
-    fontSize: 14,
+    fontSize: 20,
     color: colors.textPrimary,
-    letterSpacing: 2,
-    marginBottom: 8,
+    letterSpacing: 1,
+    marginBottom: 10,
   },
   stepDescription: {
     fontFamily: fonts.regular,
-    fontSize: 13,
-    lineHeight: 20,
+    fontSize: 15,
+    lineHeight: 24,
+    letterSpacing: 0.3,
     color: colors.textSecondary,
   },
   modalFooter: {
     fontFamily: fonts.regular,
-    fontSize: 11,
+    fontSize: 13,
     color: colors.textMeta,
     textAlign: 'center',
-    marginTop: 24,
-    letterSpacing: 1,
-    lineHeight: 18,
+    lineHeight: 20,
+    letterSpacing: 0.5,
+    paddingHorizontal: 24,
+    marginTop: 32,
   },
   languageRow: {
     flexDirection: 'row',
