@@ -36,9 +36,16 @@
       [
         "react-native-permissions",
         {
-          "iosPermissions": ["Bluetooth"]
+          "iosPermissions": [
+            "Bluetooth"
+          ]
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "48cbcfac-3aae-4f5f-a0ef-287cb42e804e"
+      }
+    }
   }
 }
