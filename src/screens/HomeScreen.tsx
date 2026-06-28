@@ -957,19 +957,19 @@ const styles = StyleSheet.create({
   },
   joinButton: {
     borderWidth: 1,
-    borderColor: colors.hopIndicator,
+    borderColor: colors.accent,
     borderRadius: 4,
     paddingVertical: 14,
     paddingHorizontal: 48,
-    backgroundColor: '#256032',
+    backgroundColor: colors.accentDim,
   },
   joinButtonPressed: {
-    backgroundColor: colors.hopIndicator,
+    backgroundColor: colors.accent,
   },
   joinLabel: {
     fontFamily: fonts.bold,
     fontSize: 13,
-    color: colors.hopIndicator,
+    color: colors.accent,
     letterSpacing: 4,
   },
   joinLabelPressed: {
