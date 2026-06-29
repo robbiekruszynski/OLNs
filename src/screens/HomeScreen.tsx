@@ -712,7 +712,7 @@ export default function HomeScreen() {
           { top: height * 0.45, transform: [{ translateY: -42 }] },
         ]}
         pointerEvents="none">
-        <Text style={styles.title}>OLNs</Text>
+        <Text style={styles.title}>OLNS</Text>
         <Text style={styles.subtitle}>OFFLINE NOTE NETWORK</Text>
         <Text style={styles.tagline}>
           peer-to-peer · mesh relay · no infrastructure
@@ -750,7 +750,7 @@ export default function HomeScreen() {
         <SafeAreaView style={styles.howItWorksModalContainer}>
           <View style={styles.howItWorksModalHeader}>
             <Text style={styles.howItWorksModalHeaderTitle}>
-              // HOW IT WORKS
+              HOW IT WORKS
             </Text>
             <Pressable
               onPress={() => setShowHowItWorks(false)}
@@ -802,7 +802,7 @@ export default function HomeScreen() {
         onRequestClose={() => setShowLanguage(false)}>
         <SafeAreaView style={styles.modalContainer}>
           <View style={styles.modalHeader}>
-            <Text style={styles.modalHeaderTitle}>// LANGUAGE</Text>
+            <Text style={styles.modalHeaderTitle}>LANGUAGE</Text>
             <Pressable
               onPress={() => setShowLanguage(false)}
               hitSlop={8}

@@ -265,7 +265,7 @@ export default function FeedScreen() {
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <Text style={styles.title}>// OLNs</Text>
+        <Text style={styles.title}>OLNS</Text>
 
         <View style={styles.statusSection}>
           <Animated.Text

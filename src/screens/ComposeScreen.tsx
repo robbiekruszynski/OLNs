@@ -230,7 +230,7 @@ export default function ComposeScreen() {
           />
 
           <View style={styles.header}>
-            <Text style={styles.headerTitle}>// COMPOSE</Text>
+            <Text style={styles.headerTitle}>COMPOSE</Text>
           </View>
 
           <View
@@ -378,7 +378,7 @@ export default function ComposeScreen() {
             ]}
             pointerEvents="none">
             <Text style={[styles.successText, { color: successTypeColor }]}>
-              // TRANSMITTED
+              TRANSMITTED
             </Text>
           </Animated.View>
         )}
@@ -404,12 +404,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 16,
     paddingBottom: 12,
+    alignItems: 'center',
   },
   headerTitle: {
     fontFamily: fonts.bold,
     fontSize: 18,
     color: colors.accent,
     letterSpacing: 2,
+    textAlign: 'center',
   },
   typeCarousel: {
     height: 100,
