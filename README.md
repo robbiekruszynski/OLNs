@@ -48,6 +48,8 @@ original author to stay in range. After broadcast, a note
 is independent of its author. The author can leave the
 area and the note continues to propagate through relays.
 
+![Note relay across a BLE mesh](./assets/note-relay-diagram.png)
+
 Notes persist on the mesh as long as at least one device
 in range is carrying them. Local storage keeps a copy on
 each device that receives or originates a note.
