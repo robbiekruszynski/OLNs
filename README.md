@@ -1,4 +1,4 @@
-# OLNs - Offline Note Network
+# OLNs - Offline Notes
 
 A mobile app that broadcasts short notes across nearby
 devices over a BLE mesh when no network is available.
@@ -56,6 +56,22 @@ The hop limit is `MAX_HOPS = 6`. A device will not relay
 a note once hopOrigin reaches that value. The limit bounds
 how far a single note can spread and reduces unbounded
 relay chains on dense meshes.
+
+6 was chosen as a reasonable balance between range and network
+load. Each hop represents one relay device, so at 6 hops a note
+has theoretically passed through 6 intermediate devices beyond
+the original author. In a real-world deployment that could
+represent a significant physical distance depending on device
+density — potentially hundreds of meters in a crowded space.
+
+The number itself is somewhat arbitrary. There is no hard
+technical reason it is 6 versus 5 or 8. The thinking was:
+
+- Too low (2-3) and notes do not travel far enough to be useful.
+- Too high (10+) and you risk flooding the mesh with redundant
+  re-broadcasts in dense environments.
+- 6 hits a middle ground that allows meaningful propagation
+  without excessive chatter.
 
 Ghost state marks notes whose author is no longer visible
 on the mesh. The SDK reports BLE peer IDs. Notes store
@@ -243,6 +259,64 @@ builds fail at link time.
 
 Set `ANDROID_HOME` in each terminal session or add it
 permanently to `~/.zshrc`.
+
+## Future Plans
+
+### Encrypted Group Channels
+
+The current mesh is public. Notes are readable by any device
+that receives them. A planned extension adds optional
+group-based encryption using shared passphrases.
+
+A group is a passphrase known to a set of users. Notes tagged
+to a group are encrypted before broadcast using that passphrase
+as the key. The note travels the mesh identically to a public
+note, relayed by any device in range, but the body is unreadable
+to devices that do not hold the passphrase.
+
+This preserves the anonymous carrier model. Devices relay
+encrypted notes they cannot read, extending range without
+exposing content.
+
+Group membership is local only. No server coordinates group
+access. The passphrase must be exchanged out of band: verbally,
+via text, or written down. This is intentional. The system has
+no central authority and no account system.
+
+From a user perspective: create a group by entering a name and
+passphrase, share the passphrase with intended recipients through
+any channel, and notes sent to that group are only visible to
+those who joined with the correct passphrase.
+
+Technical implementation will use symmetric encryption via
+expo-crypto, group identity stored in AsyncStorage, and a
+group identifier included in the note service capabilities
+so non-members can skip fetching the full body.
+
+### Platform Expansion
+
+OLNs currently targets iOS and Android via React Native.
+A desktop client for macOS and Linux would extend mesh range
+in fixed locations. A laptop left running in a space acts
+as a persistent relay node, keeping notes alive longer than
+mobile devices which move in and out of range.
+
+### Language Support
+
+The language selector on the home screen currently stubs
+eight languages. Full internationalization using i18next
+is planned, prioritizing Spanish, French, Portuguese,
+Arabic, Chinese, and Japanese based on likely deployment
+contexts for offline mesh communication tools.
+
+### Note Expiry
+
+Notes currently persist on the mesh indefinitely as long as
+a carrier device is present. A planned expiry system would
+let authors set a time-to-live on a note. After that point,
+devices stop relaying it and remove it from their local
+storage. This prevents stale notes from persisting long
+after they are relevant.
 
 ## Built With
 
