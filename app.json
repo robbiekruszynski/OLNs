@@ -4,8 +4,15 @@
     "slug": "olns",
     "version": "1.0.0",
     "orientation": "portrait",
+    "icon": "./assets/OLNs_app_logo.png",
     "newArchEnabled": false,
+    "splash": {
+      "image": "./assets/OLNsLogo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0E1117"
+    },
     "ios": {
+      "icon": "./assets/OLNs_app_logo.png",
       "bundleIdentifier": "com.olns.app",
       "supportsTablet": false,
       "infoPlist": {
@@ -19,6 +26,11 @@
       }
     },
     "android": {
+      "icon": "./assets/OLNs_app_logo.png",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/OLNs_app_logo.png",
+        "backgroundColor": "#0E1117"
+      },
       "package": "com.olns.app",
       "permissions": [
         "android.permission.INTERNET",

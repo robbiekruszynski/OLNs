@@ -3,6 +3,11 @@ import {
   IBMPlexMono_700Bold,
   useFonts,
 } from '@expo-google-fonts/ibm-plex-mono';
+import {
+  Oxanium_400Regular,
+  Oxanium_600SemiBold,
+  Oxanium_700Bold,
+} from '@expo-google-fonts/oxanium';
 import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 
 import { RootNavigator } from './src/navigation/AppNavigator';
@@ -22,6 +27,9 @@ export default function App() {
   const [fontsLoaded] = useFonts({
     IBMPlexMono_400Regular,
     IBMPlexMono_700Bold,
+    Oxanium_400Regular,
+    Oxanium_600SemiBold,
+    Oxanium_700Bold,
   });
 
   if (!fontsLoaded) {

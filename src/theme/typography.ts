@@ -1,7 +1,10 @@
 export const fonts = {
   regular: 'IBMPlexMono_400Regular',
   bold: 'IBMPlexMono_700Bold',
-} as const;
+  display: 'Oxanium_700Bold',
+  displaySemiBold: 'Oxanium_600SemiBold',
+  displayRegular: 'Oxanium_400Regular',
+};
 
 export const typography = {
   xs: { fontFamily: fonts.regular, fontSize: 10 },

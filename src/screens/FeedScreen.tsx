@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   FlatList,
+  Image,
   PanResponder,
   Pressable,
   RefreshControl,
@@ -14,7 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import NoteCard from '../components/NoteCard';
 import { useMesh } from '../mesh/MeshContext';
 import { colors } from '../theme/colors';
-import { fonts, typography } from '../theme/typography';
+import { fonts } from '../theme/typography';
 import { spacing } from '../theme/spacing';
 import type { Note, NoteType } from '../types/Note';
 
@@ -265,7 +266,11 @@ export default function FeedScreen() {
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <Text style={styles.title}>OLNS</Text>
+        <Image
+          source={require('../../assets/OLNsLogo.png')}
+          style={styles.logo}
+          resizeMode="contain"
+        />
 
         <View style={styles.statusSection}>
           <Animated.Text
@@ -413,13 +418,13 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.md,
     alignItems: 'center',
   },
-  title: {
-    ...typography.xxl,
-    fontFamily: fonts.bold,
-    color: colors.accent,
+  logo: {
+    width: 200,
+    height: 80,
+    resizeMode: 'contain',
   },
   statusSection: {
-    marginTop: spacing.md,
+    marginTop: spacing.sm,
     alignItems: 'center',
     gap: spacing.xs,
   },

@@ -3,6 +3,7 @@ import type { StackNavigationProp } from '@react-navigation/stack';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
+  Image,
   Modal,
   Pressable,
   ScrollView,
@@ -709,10 +710,17 @@ export default function HomeScreen() {
       <View
         style={[
           styles.identityOverlay,
-          { top: height * 0.45, transform: [{ translateY: -42 }] },
+          { top: height * 0.5, transform: [{ translateY: -115 }] },
         ]}
         pointerEvents="none">
-        <Text style={styles.title}>OLNS</Text>
+        <View style={styles.brandBlock}>
+          <Image
+            source={require('../../assets/OLNsLogo.png')}
+            style={styles.logo}
+            resizeMode="contain"
+          />
+          <Text style={styles.wordmark}>OLNs</Text>
+        </View>
         <Text style={styles.subtitle}>OFFLINE NOTE NETWORK</Text>
         <Text style={styles.tagline}>
           peer-to-peer · mesh relay · no infrastructure
@@ -919,22 +927,32 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     zIndex: 5,
   },
-  title: {
-    fontFamily: fonts.bold,
-    fontSize: 32,
+  brandBlock: {
+    alignItems: 'center',
+  },
+  logo: {
+    width: 300,
+    height: 120,
+    resizeMode: 'contain',
+    marginBottom: 8,
+  },
+  wordmark: {
+    fontFamily: fonts.display,
+    fontSize: 28,
     color: colors.accent,
-    letterSpacing: -0.5,
+    letterSpacing: 4,
+    textAlign: 'center',
   },
   subtitle: {
     marginTop: 12,
-    fontFamily: fonts.regular,
+    fontFamily: fonts.displayRegular,
     fontSize: 11,
     color: colors.textSecondary,
     letterSpacing: 4,
   },
   tagline: {
     marginTop: 8,
-    fontFamily: fonts.regular,
+    fontFamily: fonts.displayRegular,
     fontSize: 9,
     color: colors.textMeta,
     letterSpacing: 2,
@@ -995,7 +1013,7 @@ const styles = StyleSheet.create({
   },
   howItWorksModalHeaderTitle: {
     flex: 1,
-    fontFamily: fonts.bold,
+    fontFamily: fonts.display,
     fontSize: 16,
     color: colors.accent,
     letterSpacing: 3,
