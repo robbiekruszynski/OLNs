@@ -30,9 +30,9 @@ setup_permissions([
 # @generated end setup
 
 target 'OLNs' do
-  use_expo_modules!
-
   pod 'MeshSdk', :path => '../node_modules/@offline-protocol/mesh-sdk/ios'
+
+  use_expo_modules!
 
   if ENV['EXPO_USE_COMMUNITY_AUTOLINKING'] == '1'
     config_command = ['node', '-e', "process.argv=['', '', 'config'];require('@react-native-community/cli').run()"];
