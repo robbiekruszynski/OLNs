@@ -40,7 +40,8 @@
             "Bluetooth"
           ]
         }
-      ]
+      ],
+      "expo-font"
     ],
     "extra": {
       "eas": {
